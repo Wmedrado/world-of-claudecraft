@@ -993,20 +993,31 @@ async function startGame(
   // edge, the extra height extends upward, away from the chat log beneath it.
   const CHAT_INPUT_MIN_H = 36;
   const CHAT_INPUT_MAX_H = 110;
-  const autosizeChatInput = (): void => {
-    // Empty: pin to one line. (A long placeholder otherwise inflates a textarea's
-    // scrollHeight in Chromium, making the bar tall when empty and snapping to one
-    // line on the first keystroke.)
-    if (chatInput.value === '') {
-      chatInput.style.height = `${CHAT_INPUT_MIN_H}px`;
-      chatInput.style.overflowY = 'hidden';
-      return;
-    }
+  // Collapse to 'auto' and read the textarea's natural content height.
+  const measureChatInputScrollH = (): number => {
     chatInput.style.height = 'auto';
-    const size = chatInputSize(chatInput.scrollHeight, {
-      minHeight: CHAT_INPUT_MIN_H,
-      maxHeight: CHAT_INPUT_MAX_H,
-    });
+    return chatInput.scrollHeight;
+  };
+  const autosizeChatInput = (): void => {
+    const cs = getComputedStyle(chatInput);
+    const borderY =
+      (Number.parseFloat(cs.borderTopWidth) || 0) + (Number.parseFloat(cs.borderBottomWidth) || 0);
+    // A textarea's scrollHeight ignores the placeholder, so an empty box would measure
+    // as zero content and clip a placeholder that wraps to more than one line. When the
+    // field is empty, momentarily mirror the placeholder into the value to measure the
+    // height it needs. This is synchronous (no paint or input event in between), so the
+    // caret and text never flicker and no listener re-fires.
+    let placeholderHeight = 0;
+    if (chatInput.value === '' && chatInput.placeholder) {
+      chatInput.value = chatInput.placeholder;
+      placeholderHeight = measureChatInputScrollH();
+      chatInput.value = '';
+    }
+    const contentHeight = measureChatInputScrollH();
+    const size = chatInputSize(
+      { contentHeight, placeholderHeight, borderY },
+      { minHeight: CHAT_INPUT_MIN_H, maxHeight: CHAT_INPUT_MAX_H },
+    );
     chatInput.style.height = `${size.height}px`;
     chatInput.style.overflowY = size.overflowY;
   };
