@@ -175,7 +175,39 @@ function resolveByCode(code: string, params: Record<string, unknown> | undefined
   return t(key);
 }
 
+// A failed fetch (the server is unreachable: connection refused, DNS failure, the device
+// is offline, or a dev run started without `npm run server`) rejects with a TypeError, not
+// an ApiError: it carries no HTTP status and no stable code, so neither layer below would
+// recognize it and the raw browser string ("Failed to fetch") would leak into the
+// login/register form (issue #1737). Engines word it differently ("Failed to fetch" on
+// Chromium, "NetworkError when attempting to fetch resource." on Firefox, "Load failed" on
+// Safari; Node/undici says "fetch failed"), so match the known transport-failure messages
+// rather than one engine's wording.
+const TRANSPORT_FAILURE_PATTERNS = [
+  'failed to fetch',
+  'networkerror', // Firefox: "NetworkError when attempting to fetch resource."
+  'load failed', // Safari
+  'fetch failed', // Node / undici (the underlying cause is e.g. ECONNREFUSED)
+  'network request failed',
+  'the network connection was lost',
+];
+
+// True only for a transport/connection failure that never reached the server. An ApiError
+// (any numeric HTTP status, including a real 5xx from a server that DID answer) is not one:
+// those stay English diagnostics by design.
+function isTransportFailure(err: unknown): boolean {
+  if (err && typeof err === 'object' && typeof (err as { status?: unknown }).status === 'number') {
+    return false;
+  }
+  const message = technicalErrorMessage(err).toLowerCase();
+  return TRANSPORT_FAILURE_PATTERNS.some((pattern) => message.includes(pattern));
+}
+
 export function userFacingApiError(err: unknown): string {
+  // The server was unreachable (fetch rejected). Surface the same localized connection
+  // message the WebSocket-drop path already uses, not the raw browser diagnostic.
+  if (isTransportFailure(err)) return t('loading.connectionLost');
+
   const code = errorCode(err);
   if (code) {
     const byCode = resolveByCode(code, errorParams(err));

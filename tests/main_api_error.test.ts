@@ -96,6 +96,34 @@ describe('userFacingApiError parametric codes', () => {
   });
 });
 
+describe('userFacingApiError transport / server-unreachable failures', () => {
+  it('maps a browser fetch failure (server unreachable) to the connection message', () => {
+    // When the game server is not running, the browser fetch in Api.post rejects with a
+    // TypeError and no HTTP status. The login/register form must show the localized
+    // connection message, not the raw "Failed to fetch" browser string (issue #1737).
+    expect(userFacingApiError(new TypeError('Failed to fetch'))).toBe(t('loading.connectionLost'));
+    expect(userFacingApiError(new TypeError('Failed to fetch'))).not.toBe('Failed to fetch');
+  });
+
+  it('recognizes the Firefox, Safari, and Node/undici transport wordings too', () => {
+    // Each engine words an unreachable-server fetch failure differently; all resolve to
+    // the same connection message rather than leaking their raw diagnostic text.
+    expect(
+      userFacingApiError(new TypeError('NetworkError when attempting to fetch resource.')),
+    ).toBe(t('loading.connectionLost'));
+    expect(userFacingApiError(new TypeError('Load failed'))).toBe(t('loading.connectionLost'));
+    expect(userFacingApiError(new TypeError('fetch failed'))).toBe(t('loading.connectionLost'));
+  });
+
+  it('does NOT treat a real HTTP 5xx from a reachable server as a transport failure', () => {
+    // A 500 that carries an HTTP status is an application error from a server that DID
+    // answer, not an unreachable server; it stays the English diagnostic (the
+    // "diagnostics stay English" rule), unchanged by the transport-failure detection.
+    const err = new ApiError('request failed (500)', 500);
+    expect(userFacingApiError(err)).toBe('request failed (500)');
+  });
+});
+
 describe('userFacingApiError prose fallback (un-migrated routes, until Phase 25)', () => {
   it('preserves the captured suspension date from the legacy prose message', () => {
     const err = new Error('This account is suspended until Wed, 09 Jul 2026 12:00:00 GMT.');
