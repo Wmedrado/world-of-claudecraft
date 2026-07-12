@@ -9,15 +9,20 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error scripts use the repository's untyped Node ESM convention
 import * as conformAudioModule from '../scripts/sfx/conform_audio.mjs';
 import {
+  channelProblem,
   classify,
+  expectedChannelsForEntry,
   LOSSLESS_EXTENSIONS,
   MIN_SOURCE_BITRATE,
   NORM_TOLERANCE,
   TARGET_BITRATE,
   TARGET_LUFS,
+  TARGET_MONO_CHANNELS,
   TARGET_PEAK_DBFS,
   TARGET_SAMPLE_RATE,
+  TARGET_STEREO_CHANNELS,
 } from '../scripts/sfx/sfx_conform_rules.mjs';
+import { SFX } from '../scripts/sfx/sfx_prompts.mjs';
 
 const { buildSfxConformArgs, conformSfxAudio, inspectSfxConformance, measureSfxTruePeakDb } =
   conformAudioModule;
@@ -284,6 +289,150 @@ describe('classify: lossless sources', () => {
   it('LOSSLESS_EXTENSIONS does not contain lossy formats', () => {
     for (const ext of ['.mp3', '.ogg', '.opus', '.m4a']) {
       expect(LOSSLESS_EXTENSIONS.has(ext)).toBe(false);
+    }
+  });
+});
+
+describe('channel policy: pure rules', () => {
+  it('keeps stereo only for entries flagged stereo', () => {
+    expect(expectedChannelsForEntry({ stereo: true })).toBe(TARGET_STEREO_CHANNELS);
+    expect(expectedChannelsForEntry({ key: 'foot_grass' })).toBe(TARGET_MONO_CHANNELS);
+    expect(expectedChannelsForEntry({ stereo: false })).toBe(TARGET_MONO_CHANNELS);
+    expect(expectedChannelsForEntry(undefined)).toBe(TARGET_MONO_CHANNELS);
+    expect(expectedChannelsForEntry(null)).toBe(TARGET_MONO_CHANNELS);
+  });
+
+  it('names a stereo-where-mono violation', () => {
+    expect(channelProblem(TARGET_STEREO_CHANNELS, TARGET_MONO_CHANNELS)).toBe('2ch (want mono)');
+  });
+
+  it('names a mono-where-stereo violation', () => {
+    expect(channelProblem(TARGET_MONO_CHANNELS, TARGET_STEREO_CHANNELS)).toBe('mono (want stereo)');
+  });
+
+  it('reports no problem when channels match policy', () => {
+    expect(channelProblem(TARGET_MONO_CHANNELS, TARGET_MONO_CHANNELS)).toBeNull();
+    expect(channelProblem(TARGET_STEREO_CHANNELS, TARGET_STEREO_CHANNELS)).toBeNull();
+  });
+
+  it('invents no violation from missing channel metadata', () => {
+    expect(channelProblem(0, TARGET_MONO_CHANNELS)).toBeNull();
+    expect(channelProblem(TARGET_STEREO_CHANNELS, 0)).toBeNull();
+  });
+});
+
+describe('channel policy: catalog data', () => {
+  it('flags exactly the ambience loops as stereo', () => {
+    const stereoKeys = SFX.filter((entry) => entry.stereo).map((entry) => entry.key);
+    const ambienceLoops = SFX.filter((entry) => entry.loop && entry.key.startsWith('amb_')).map(
+      (entry) => entry.key,
+    );
+    expect(stereoKeys.sort()).toEqual(ambienceLoops.sort());
+    expect(stereoKeys.length).toBeGreaterThan(0);
+  });
+
+  it('keeps every positional, one-shot, cast, voice, and UI cue mono', () => {
+    for (const entry of SFX) {
+      if (entry.key.startsWith('amb_')) continue;
+      expect(expectedChannelsForEntry(entry), entry.key).toBe(TARGET_MONO_CHANNELS);
+    }
+  });
+});
+
+describe('shared conform command: channel downmix', () => {
+  it('adds -ac only when a channel target is given', () => {
+    const withChannels = buildSfxConformArgs({
+      inputFile: '/tmp/source.wav',
+      outputFile: '/tmp/output.mp3',
+      duration: 0.5,
+      gainDb: 0,
+      channels: TARGET_MONO_CHANNELS,
+    });
+    expect(withChannels.args[withChannels.args.indexOf('-ac') + 1]).toBe(
+      String(TARGET_MONO_CHANNELS),
+    );
+    // -ac is an output remap, placed after -ar and before the encoder.
+    expect(withChannels.args.indexOf('-ac')).toBeGreaterThan(withChannels.args.indexOf('-ar'));
+    expect(withChannels.args.indexOf('-ac')).toBeLessThan(withChannels.args.indexOf('-codec:a'));
+
+    const withoutChannels = buildSfxConformArgs({
+      inputFile: '/tmp/source.wav',
+      outputFile: '/tmp/output.mp3',
+      duration: 0.5,
+      gainDb: 0,
+    });
+    expect(withoutChannels.args).not.toContain('-ac');
+  });
+
+  it('rejects a channel target that is neither mono nor stereo', () => {
+    expect(() =>
+      buildSfxConformArgs({
+        inputFile: '/tmp/source.wav',
+        outputFile: '/tmp/output.mp3',
+        duration: 0.5,
+        gainDb: 0,
+        channels: 3,
+      }),
+    ).toThrow(/channel target/);
+  });
+
+  it('downmixes a stereo source to a mono master', () => {
+    if (!ffmpegPath) throw new Error('ffmpeg-static is unavailable');
+    const directory = mkdtempSync(join(tmpdir(), 'wocc-sfx-downmix-'));
+    const inputFile = join(directory, 'stereo.wav');
+    const outputFile = join(directory, 'mono.mp3');
+
+    try {
+      // Distinct tones per channel guarantee a genuine two-channel source.
+      execFileSync(
+        ffmpegPath,
+        [
+          '-hide_banner',
+          '-loglevel',
+          'error',
+          '-nostdin',
+          '-y',
+          '-f',
+          'lavfi',
+          '-i',
+          'sine=frequency=440:sample_rate=44100:duration=0.5',
+          '-f',
+          'lavfi',
+          '-i',
+          'sine=frequency=660:sample_rate=44100:duration=0.5',
+          '-filter_complex',
+          '[0:a][1:a]join=inputs=2:channel_layout=stereo[a]',
+          '-map',
+          '[a]',
+          '-c:a',
+          'pcm_s16le',
+          inputFile,
+        ],
+        { stdio: 'ignore' },
+      );
+
+      const source = inspectSfxConformance(inputFile, {
+        ffmpegPath,
+        ffprobePath: ffprobeStatic.path,
+      });
+      expect(source.channels).toBe(TARGET_STEREO_CHANNELS);
+
+      conformSfxAudio({
+        inputFile,
+        outputFile,
+        duration: 0.5,
+        ffmpegPath,
+        channels: TARGET_MONO_CHANNELS,
+      });
+
+      const conformed = inspectSfxConformance(outputFile, {
+        ffmpegPath,
+        ffprobePath: ffprobeStatic.path,
+      });
+      expect(conformed.channels).toBe(TARGET_MONO_CHANNELS);
+      expect(channelProblem(conformed.channels, TARGET_MONO_CHANNELS)).toBeNull();
+    } finally {
+      rmSync(directory, { force: true, recursive: true });
     }
   });
 });

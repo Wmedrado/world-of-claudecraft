@@ -13,8 +13,10 @@ import {
   NORM_TOLERANCE,
   TARGET_BITRATE,
   TARGET_LUFS,
+  TARGET_MONO_CHANNELS,
   TARGET_PEAK_DBFS,
   TARGET_SAMPLE_RATE,
+  TARGET_STEREO_CHANNELS,
 } from './sfx_conform_rules.mjs';
 
 export const SFX_AUDIO_EXTENSIONS = new Set([
@@ -109,9 +111,18 @@ function filterNumber(value) {
   return Object.is(rounded, -0) ? 0 : rounded;
 }
 
-export function buildSfxConformArgs({ inputFile, outputFile, duration, gainDb }) {
+export function buildSfxConformArgs({ inputFile, outputFile, duration, gainDb, channels = null }) {
   const normBranch = duration < DURATION_THRESHOLD ? 'peak' : 'lufs';
   if (!Number.isFinite(gainDb)) throw new Error('SFX conformance requires a finite gain');
+  if (
+    channels !== null &&
+    channels !== TARGET_MONO_CHANNELS &&
+    channels !== TARGET_STEREO_CHANNELS
+  ) {
+    throw new Error(
+      `SFX channel target must be ${TARGET_MONO_CHANNELS} or ${TARGET_STEREO_CHANNELS}, got ${channels}`,
+    );
+  }
   const filters = [`volume=${filterNumber(gainDb)}dB`];
   if (normBranch === 'lufs') {
     // Sustained material can have a crest factor that makes -14 LUFS exceed a
@@ -121,6 +132,10 @@ export function buildSfxConformArgs({ inputFile, outputFile, duration, gainDb })
     filters.push(`alimiter=limit=${LONG_FORM_LIMIT}:attack=5:release=50:level=false:latency=true`);
   }
   filters.push(`aformat=sample_rates=${TARGET_SAMPLE_RATE}`);
+  // Channel downmix is an output remap (`-ac`), applied before the encoder and
+  // after the level filters so loudness is measured on the retained channels.
+  // Omitting `channels` preserves the source channel count (UI generator, Studio).
+  const channelArgs = channels === null ? [] : ['-ac', String(channels)];
   return {
     normBranch,
     args: [
@@ -135,6 +150,7 @@ export function buildSfxConformArgs({ inputFile, outputFile, duration, gainDb })
       filters.join(','),
       '-ar',
       String(TARGET_SAMPLE_RATE),
+      ...channelArgs,
       '-codec:a',
       'libmp3lame',
       '-b:a',
@@ -149,7 +165,14 @@ export function buildSfxConformArgs({ inputFile, outputFile, duration, gainDb })
 }
 
 /** Conform one source to an MP3 without changing or deleting the input file. */
-export function conformSfxAudio({ inputFile, outputFile, duration, ffmpegPath, peakDb = null }) {
+export function conformSfxAudio({
+  inputFile,
+  outputFile,
+  duration,
+  ffmpegPath,
+  peakDb = null,
+  channels = null,
+}) {
   const normBranch = duration < DURATION_THRESHOLD ? 'peak' : 'lufs';
   const measuredInput =
     normBranch === 'peak'
@@ -171,6 +194,7 @@ export function conformSfxAudio({ inputFile, outputFile, duration, ffmpegPath, p
         outputFile: temporary,
         duration,
         gainDb,
+        channels,
       });
       run(ffmpegPath, plan.args);
       const measuredOutput =

@@ -12,6 +12,32 @@ export const NORM_TOLERANCE = 0.5; // dB/LU tolerance window for loudness checks
 // meaningless for the quality gate and is never flagged as a problem.
 export const LOSSLESS_EXTENSIONS = new Set(['.wav', '.flac', '.aiff', '.aif']);
 
+export const TARGET_MONO_CHANNELS = 1;
+export const TARGET_STEREO_CHANNELS = 2;
+
+// Channel policy. Stereo is retained ONLY for catalog entries explicitly flagged
+// `stereo: true` (ambience loops, where L/R width is audible and the loop is not
+// positioned through a panner). Every other cue is mono: `playAt` routes through
+// an equalpower PannerNode that downmixes to mono before positioning, and
+// `playUi` sums to the mono master, so a second channel is decoded into the
+// shared AudioBuffer and then discarded. Encoding those cues mono halves their
+// decoded footprint, which is the binding constraint on the iOS WKWebView build.
+// Standard: docs/design/sound_effects.md.
+export function expectedChannelsForEntry(entry) {
+  return entry?.stereo ? TARGET_STEREO_CHANNELS : TARGET_MONO_CHANNELS;
+}
+
+// Return a human-readable channel problem, or null when the file matches policy.
+// `channels` is the measured stream channel count; `expected` is the policy
+// target from expectedChannelsForEntry. A non-positive value on either side means
+// the metadata cannot decide the question, so no violation is invented.
+export function channelProblem(channels, expected) {
+  if (!(channels > 0) || !(expected > 0) || channels === expected) return null;
+  const want = expected === TARGET_MONO_CHANNELS ? 'mono' : 'stereo';
+  const got = channels === TARGET_MONO_CHANNELS ? 'mono' : `${channels}ch`;
+  return `${got} (want ${want})`;
+}
+
 /**
  * Classify a file's measured stats and return what problems need fixing.
  *
