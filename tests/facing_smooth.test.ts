@@ -1,10 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  stepSelfFacing,
+  advanceSelfFacing,
   approachAngle,
   releaseSelfFacing,
-  SELF_TURN_MAX_RATE,
   SELF_FACING_CONVERGE_EPS,
+  SELF_TURN_MAX_RATE,
+  stepSelfFacing,
+  wrapAngle,
 } from '../src/render/facing_smooth';
 
 const FRAME_60 = 1 / 60;
@@ -65,6 +67,62 @@ describe('stepSelfFacing', () => {
     const moved = Math.abs(stepSelfFacing(0, Math.PI, 0.5) - 0);
     // 0.5s would be a huge step; it is clamped to the MAX_FRAME_DT budget
     expect(moved).toBeLessThanOrEqual(SELF_TURN_MAX_RATE * (1 / 30) + 1e-9);
+  });
+});
+
+describe('advanceSelfFacing', () => {
+  it('stays glued to a fast flick instead of trailing behind the camera (issue #1778)', () => {
+    // Reproduces the bug: a brief but fast right-mouse flick rotates the camera
+    // faster than SELF_TURN_MAX_RATE. A plain velocity cap makes the model fall
+    // steadily behind, opening a gap that snaps shut on release. The camera's
+    // ongoing rotation must instead be applied 1:1 so the body stays with it.
+    const perFrame = 0.4; // rad/frame, well above the cap (10/60 = 0.167)
+    let camYaw = 0;
+    let model = 0; // glued to the camera at engage (no residual)
+    let lastTarget = camYaw;
+    let capped = 0; // a raw velocity cap, for contrast
+    let cappedCam = 0;
+    for (let f = 0; f < 6; f++) {
+      camYaw += perFrame;
+      model = advanceSelfFacing(model, camYaw, lastTarget, FRAME_60);
+      lastTarget = camYaw;
+      cappedCam += perFrame;
+      capped = stepSelfFacing(capped, cappedCam, FRAME_60);
+    }
+    // decoupled: the model rides the camera exactly, no built-up lag
+    expect(Math.abs(wrapAngle(model - camYaw))).toBeCloseTo(0, 6);
+    // contrast: the old raw cap trails the same flick by well over half a radian
+    expect(Math.abs(wrapAngle(capped - cappedCam))).toBeGreaterThan(0.5);
+  });
+
+  it('still eases the engage discontinuity instead of teleporting (orbit then engage)', () => {
+    // Engaging mouselook after orbiting ~180deg away: the seed gap is residual
+    // and must ease in under the cap, exactly like the old stepSelfFacing did.
+    const seed = 0; // model showing the sim facing
+    const camYaw = Math.PI - 0.01; // camera orbited almost fully behind
+    const next = advanceSelfFacing(seed, camYaw, camYaw, FRAME_60);
+    const moved = Math.abs(wrapAngle(next - seed));
+    expect(moved).toBeLessThan(Math.PI); // not a teleport
+    expect(moved).toBeCloseTo(SELF_TURN_MAX_RATE * FRAME_60, 5);
+  });
+
+  it('the first engage frame matches the old rate-limited step exactly', () => {
+    // On first engage lastTarget === target, so the whole seed gap is residual
+    // and the result is identical to a plain velocity cap toward the camera.
+    const seed = 0.3;
+    const camYaw = 2.0;
+    expect(advanceSelfFacing(seed, camYaw, camYaw, FRAME_60)).toBeCloseTo(
+      stepSelfFacing(seed, camYaw, FRAME_60),
+      6,
+    );
+  });
+
+  it('follows a sharp one-frame camera move once the residual has closed', () => {
+    // Held long enough that the residual is zero; a single sharp flick (0.9 rad
+    // in one frame, far over the cap) is followed exactly, where a raw cap would
+    // clip it to the max step and lag.
+    const next = advanceSelfFacing(1.0, 1.9, 1.0, FRAME_60);
+    expect(next).toBeCloseTo(1.9, 6);
   });
 });
 

@@ -56,7 +56,7 @@ import { buildDelveInteractable } from './delve_props';
 import { buildDoorBody } from './door_portal';
 import { DungeonInteriors, ensureDungeonAssets } from './dungeon';
 import { objectDisplayName } from './entity_labels';
-import { releaseSelfFacing, stepSelfFacing } from './facing_smooth';
+import { advanceSelfFacing, releaseSelfFacing } from './facing_smooth';
 import { buildFish, type FishView } from './fish';
 import {
   buildFoliage,
@@ -877,6 +877,11 @@ export class Renderer {
   // engage re-seeds from the live interpolated facing instead of snapping. See
   // facing_smooth.ts for why the camera-driven yaw must be rate-limited.
   private selfFacingOverride: number | null = null;
+  // Camera yaw applied on the previous camera-driven frame. advanceSelfFacing
+  // subtracts it to tell the camera's ongoing rotation (applied 1:1) apart from
+  // the residual engage gap (rate-limited), so a fast flick never lags. Null
+  // while disengaged so the next engage re-seeds cleanly.
+  private selfFacingLastTarget: number | null = null;
   private cameraLookAt = new THREE.Vector3();
   // floating /say-/yell bubbles, keyed by speaker entity id
   private chatBubbles = new Map<number, { el: HTMLDivElement; until: number }>();
@@ -4190,6 +4195,7 @@ export class Renderer {
       this.lastSelfId = p.id;
       this.selfRenderPositionReady = false;
       this.selfFacingOverride = null;
+      this.selfFacingLastTarget = null;
       // A still-decaying predictor-handoff offset belongs to the previous
       // character; leaking it would displace the new one for a few frames.
       this.selfMotionOffset.set(0, 0, 0);
@@ -4352,12 +4358,16 @@ export class Renderer {
       v.group.position.set(x, y, z);
       let facing = e.prevFacing + shortestAngle(e.prevFacing, e.facing) * facingAlpha(ea);
       if (id === p.id && renderFacingOverride !== null) {
-        // Rate-limit the camera-driven heading so engaging mouselook (or starting
-        // to move in Mouse Camera mode) rotates the model smoothly toward the
-        // camera instead of teleporting it up to 180deg in a single frame. Seed
-        // from the current interpolated facing on first engage.
-        facing = stepSelfFacing(this.selfFacingOverride ?? facing, renderFacingOverride, dt);
+        // Follow the camera-driven heading, easing in the one-time engage gap
+        // (up to 180deg when engaging after an orbit) under the rate limiter
+        // while applying the camera's ongoing rotation 1:1. Seed the model and
+        // the last-target from the current values on first engage so the whole
+        // seed gap is treated as residual and a fast flick never trails behind.
+        const prevModel = this.selfFacingOverride ?? facing;
+        const lastTarget = this.selfFacingLastTarget ?? renderFacingOverride;
+        facing = advanceSelfFacing(prevModel, renderFacingOverride, lastTarget, dt);
         this.selfFacingOverride = facing;
+        this.selfFacingLastTarget = renderFacingOverride;
       } else if (id === p.id && this.selfFacingOverride !== null) {
         // Disengage frame: route the return to the interpolated sim facing
         // through the SAME rate limiter so releasing mouselook mid-flick (before
@@ -4366,6 +4376,7 @@ export class Renderer {
         const r = releaseSelfFacing(this.selfFacingOverride, facing, dt);
         facing = r.facing;
         this.selfFacingOverride = r.done ? null : r.facing;
+        if (r.done) this.selfFacingLastTarget = null;
       }
       v.group.rotation.y = facing;
 
