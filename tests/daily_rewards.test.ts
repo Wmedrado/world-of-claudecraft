@@ -578,7 +578,7 @@ describe('daily rewards', () => {
     expect(taskEvents).toHaveLength(1);
     expect(taskEvents[0]).toMatchObject({
       points: 75,
-      key: 'task:vale_cup_ranked_wins:vale_cup:42:win',
+      key: 'task:vale_cup_ranked_wins:vale_cup:42:win:2026-06-30T13:01:00.000Z',
       meta: {
         taskId: 'vale_cup_ranked_wins',
         taskType: 'vale_cup_result',
@@ -607,7 +607,7 @@ describe('daily rewards', () => {
     const botEvent = db.events.filter((event) => event.kind === 'task')[1];
     expect(botEvent).toMatchObject({
       points: 15,
-      key: 'task:vale_cup_ranked_wins:vale_cup:43:bot_win',
+      key: 'task:vale_cup_ranked_wins:vale_cup:43:bot_win:2026-06-30T13:02:00.000Z',
       meta: {
         taskId: 'vale_cup_ranked_wins',
         taskType: 'vale_cup_result',
@@ -638,7 +638,7 @@ describe('daily rewards', () => {
     const practiceEvent = db.events.filter((event) => event.kind === 'task')[2];
     expect(practiceEvent).toMatchObject({
       points: 15,
-      key: 'task:vale_cup_ranked_wins:vale_cup:44:practice_win',
+      key: 'task:vale_cup_ranked_wins:vale_cup:44:practice_win:2026-06-30T13:03:00.000Z',
       meta: {
         taskId: 'vale_cup_ranked_wins',
         taskType: 'vale_cup_result',
@@ -655,6 +655,76 @@ describe('daily rewards', () => {
       },
     });
     expect(db.score).toBe(105);
+  });
+
+  it('credits Vale Cup wins after a server restart resets the match id counter', async () => {
+    // Regression for issue 1831: Vale Cup match ids come from in-memory sim state
+    // (VcState.nextMatchId) that createVcState resets to 1 on every server boot. Keying
+    // the daily-reward dedupe row on the raw match id let a mid-day restart collide with
+    // an id the account was already credited for that day, so the ON CONFLICT DO NOTHING
+    // silently swallowed the win. The completedAt in the key keeps the two matches
+    // distinct while still rejecting a genuine replay of the same match.
+    const db = new FakeDailyRewardDb();
+    const service = new DailyRewardService(db);
+    resetDailyRewardPriceCacheForTests();
+    stubRewardConfig({
+      tasks: [
+        {
+          id: 'vale_cup_ranked_wins',
+          type: 'vale_cup_result',
+          title: 'Win Vale Cup matches',
+          description:
+            'Win Vale Cup football matches today. Bot-filled and practice wins award fewer points.',
+          points: 25,
+          basePoints: 25,
+          sortOrder: 1,
+          active: true,
+          config: {
+            winBasePoints: 25,
+            botWinBasePoints: 5,
+            minMultiplier: 1,
+            maxMultiplier: 3,
+            minutesPerMultiplier: 30,
+          },
+        },
+      ],
+    });
+
+    // A ranked win before the restart. The match id counter has climbed to 7 this boot.
+    const beforeRestart = await service.recordValeCupResult(1, {
+      won: true,
+      bracket: 1,
+      matchId: 7,
+      completedAt: new Date('2026-06-30T13:00:00.000Z'),
+    });
+    expect(beforeRestart).toBe(25);
+    expect(db.events.filter((event) => event.kind === 'task')).toHaveLength(1);
+    expect(db.score).toBe(25);
+
+    // The server restarts mid reward-day: nextMatchId resets to 1 and the next match
+    // reuses id 7, colliding with the id already credited today. Before the fix the
+    // colliding idempotency key no-ops and this win awards nothing.
+    const afterRestart = await service.recordValeCupResult(1, {
+      won: true,
+      bracket: 1,
+      matchId: 7,
+      completedAt: new Date('2026-06-30T13:20:00.000Z'),
+    });
+    expect(afterRestart).toBe(25);
+    expect(db.events.filter((event) => event.kind === 'task')).toHaveLength(2);
+    expect(db.score).toBe(50);
+
+    // The dedupe intent survives: replaying the exact same match (same id AND same
+    // completion time) is still rejected, so one match yields at most one grant.
+    const replay = await service.recordValeCupResult(1, {
+      won: true,
+      bracket: 1,
+      matchId: 7,
+      completedAt: new Date('2026-06-30T13:20:00.000Z'),
+    });
+    expect(replay).toBe(0);
+    expect(db.events.filter((event) => event.kind === 'task')).toHaveLength(2);
+    expect(db.score).toBe(50);
   });
 
   it('awards delve clear task points with level, tier, and online-time scaling', async () => {

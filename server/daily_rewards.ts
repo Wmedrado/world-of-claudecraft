@@ -893,8 +893,12 @@ export class DailyRewardService {
 
   // Vale Cup daily task: wins only. Rated wins use the full task value; bot-filled
   // and practice wins use a much smaller base so they can contribute without competing
-  // with real ranked match rewards. The match id keys the dedupe row, so one match
-  // yields at most one grant per account.
+  // with real ranked match rewards. The match id plus the completion time key the
+  // dedupe row: the in-memory match id resets to 1 on every server boot, so keying on
+  // it alone lets a mid-day restart collide with an id the account was already credited
+  // for that day and silently drop the points (the same restart-safety the arena and
+  // delve-chest keys get from their timestamp). One match still yields at most one grant
+  // per account: a decided bout emits vcupResult once, so completedAt is stable per match.
   async recordValeCupResult(
     accountId: number,
     result: {
@@ -940,7 +944,7 @@ export class DailyRewardService {
         accountId,
         'task',
         points,
-        `task:${task.taskId}:vale_cup:${result.matchId}:${outcomeKey}`,
+        `task:${task.taskId}:vale_cup:${result.matchId}:${outcomeKey}:${completedAt.toISOString()}`,
         {
           taskId: task.taskId,
           taskType: task.type,
