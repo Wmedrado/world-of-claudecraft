@@ -381,6 +381,7 @@ import {
   angleTo,
   armorReduction,
   type CrowdControlDrCategory,
+  type CrowdControlDrState,
   cloneInvSlot,
   cloneItemInstancePayload,
   DELVE_COMPANION_HEAL_INTERVAL,
@@ -651,6 +652,17 @@ export interface ArenaQueueUnit {
 // slot; `returns` remembers where each was standing so the match can put them
 // back when it ends. Ratings are snapshotted at the start purely for the
 // result message — the authoritative values live on each PlayerMeta.
+// Per-fighter recovery pools snapshotted at match formation (before the arena
+// clean-slate reset) so returnFromArena can restore them instead of full-healing.
+// This is what stops an arena bout being abused as a free, instant full restore
+// of HP, resource, and cooldowns (issue #1600).
+export interface ArenaReturnPools {
+  hp: number;
+  resource: number;
+  cooldowns: Map<string, number>;
+  ccDr: Map<CrowdControlDrCategory, CrowdControlDrState>;
+}
+
 export interface ArenaMatch {
   id: number;
   format: ArenaFormat;
@@ -660,6 +672,11 @@ export interface ArenaMatch {
   state: 'countdown' | 'active' | 'over';
   timer: number; // countdown remaining, then elapsed once active, then return countdown
   returns: Map<number, { x: number; z: number; facing: number }>;
+  // Pre-match HP/resource/cooldown pools keyed by pid, restored on return so the
+  // bout is never a free full-restore (issue #1600). Set only by the ranked/fiesta
+  // startArenaMatch path; yumi matches share this type but leave it undefined
+  // (they keep the legacy full-heal-on-return), so it is optional.
+  preMatchPools?: Map<number, ArenaReturnPools>;
   ratingA: number; // team avg at start
   ratingB: number;
   defeated: Set<number>;
