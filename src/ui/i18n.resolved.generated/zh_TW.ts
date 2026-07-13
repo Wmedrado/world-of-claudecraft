@@ -360,6 +360,16 @@ export const zh_TW: EnTranslations = {
       "notNow": "暫不",
       "update": "更新"
     },
+    "cameraPrompt": {
+      "title": "選擇你的鏡頭",
+      "intro": "選擇鏡頭跟隨角色的方式。",
+      "mouseDesc": "移動滑鼠即可轉動鏡頭。多數新手偏好的現代操作方式。",
+      "recommended": "推薦",
+      "classicTitle": "經典鏡頭",
+      "classicDesc": "按住右鍵轉動鏡頭。傳統的操作方案。",
+      "changeLater": "稍後可在 Esc 選單的「按鍵綁定」中變更。",
+      "confirm": "確認"
+    },
     "castBar": {
       "playerAria": "你的施法條",
       "targetAria": "目標施法條"

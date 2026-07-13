@@ -360,6 +360,16 @@ export const pl_PL: EnTranslations = {
       "notNow": "Nie teraz",
       "update": "Aktualizuj"
     },
+    "cameraPrompt": {
+      "title": "Choose Your Camera",
+      "intro": "Pick how the camera follows your character.",
+      "mouseDesc": "Move the mouse to turn the camera. Modern controls most new players prefer.",
+      "recommended": "Recommended",
+      "classicTitle": "Classic Camera",
+      "classicDesc": "Hold right-click to turn the camera. The traditional control scheme.",
+      "changeLater": "You can change this later under Esc, Key Bindings.",
+      "confirm": "Confirm"
+    },
     "castBar": {
       "playerAria": "Twój pasek rzucania",
       "targetAria": "Pasek rzucania jednostki"

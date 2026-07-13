@@ -360,6 +360,16 @@ export const id_ID: EnTranslations = {
       "notNow": "Jangan sekarang",
       "update": "Perbarui"
     },
+    "cameraPrompt": {
+      "title": "Choose Your Camera",
+      "intro": "Pick how the camera follows your character.",
+      "mouseDesc": "Move the mouse to turn the camera. Modern controls most new players prefer.",
+      "recommended": "Recommended",
+      "classicTitle": "Classic Camera",
+      "classicDesc": "Hold right-click to turn the camera. The traditional control scheme.",
+      "changeLater": "You can change this later under Esc, Key Bindings.",
+      "confirm": "Confirm"
+    },
     "castBar": {
       "playerAria": "Bilah Rapal Anda",
       "targetAria": "Bilah Rapal Unit"

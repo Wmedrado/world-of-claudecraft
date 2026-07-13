@@ -360,6 +360,16 @@ export const tr_TR: EnTranslations = {
       "notNow": "Şimdi Değil",
       "update": "Güncelle"
     },
+    "cameraPrompt": {
+      "title": "Choose Your Camera",
+      "intro": "Pick how the camera follows your character.",
+      "mouseDesc": "Move the mouse to turn the camera. Modern controls most new players prefer.",
+      "recommended": "Recommended",
+      "classicTitle": "Classic Camera",
+      "classicDesc": "Hold right-click to turn the camera. The traditional control scheme.",
+      "changeLater": "You can change this later under Esc, Key Bindings.",
+      "confirm": "Confirm"
+    },
     "castBar": {
       "playerAria": "Senin Büyü Çubuğun",
       "targetAria": "Birim Büyü Çubuğu"
