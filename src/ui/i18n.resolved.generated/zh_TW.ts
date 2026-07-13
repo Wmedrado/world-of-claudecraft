@@ -363,10 +363,9 @@ export const zh_TW: EnTranslations = {
     "cameraPrompt": {
       "title": "選擇你的鏡頭",
       "intro": "選擇鏡頭跟隨角色的方式。",
-      "mouseDesc": "移動滑鼠即可轉動鏡頭。多數新手偏好的現代操作方式。",
-      "recommended": "推薦",
+      "mouseDesc": "無需按住滑鼠按鍵，移動滑鼠即可轉動鏡頭。",
       "classicTitle": "經典鏡頭",
-      "classicDesc": "按住右鍵轉動鏡頭。傳統的操作方案。",
+      "classicDesc": "按住滑鼠右鍵並移動滑鼠來轉動鏡頭。",
       "changeLater": "稍後可在 Esc 選單的「按鍵綁定」中變更。",
       "confirm": "確認"
     },

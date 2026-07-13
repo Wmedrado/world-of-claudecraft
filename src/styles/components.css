@@ -2853,16 +2853,6 @@
     font-weight: 600;
     font-size: 14px;
   }
-  .camera-prompt-badge {
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: #1a1206;
-    background: var(--gold-dim);
-    border-radius: var(--radius-sm);
-    padding: 1px 6px;
-  }
   .camera-prompt-option-desc {
     color: var(--color-text-muted);
     font-size: 12px;

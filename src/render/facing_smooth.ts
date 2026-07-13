@@ -93,8 +93,11 @@ export function releaseSelfFacing(
   current: number,
   simFacing: number,
   frameDt: number,
-): { facing: number; done: boolean } {
+): { facing: number; done: boolean; lastTarget: null } {
   const next = stepSelfFacing(current, simFacing, frameDt);
   const done = Math.abs(wrapAngle(simFacing - next)) <= SELF_FACING_CONVERGE_EPS;
-  return { facing: done ? simFacing : next, done };
+  // A release may be interrupted before convergence. Clear the prior camera
+  // target immediately so that re-engaging after an orbit is treated as a fresh,
+  // rate-limited engage gap instead of one large continuous camera delta.
+  return { facing: done ? simFacing : next, done, lastTarget: null };
 }

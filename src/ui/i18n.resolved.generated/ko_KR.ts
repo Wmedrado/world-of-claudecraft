@@ -363,10 +363,9 @@ export const ko_KR: EnTranslations = {
     "cameraPrompt": {
       "title": "카메라 선택",
       "intro": "카메라가 캐릭터를 따라가는 방식을 선택하세요.",
-      "mouseDesc": "마우스를 움직여 시점을 돌립니다. 대부분의 초보자가 선호하는 현대적 조작입니다.",
-      "recommended": "권장",
+      "mouseDesc": "버튼을 누르지 않고 마우스를 움직여 시점을 돌립니다.",
       "classicTitle": "클래식 카메라",
-      "classicDesc": "우클릭을 누른 채 시점을 돌립니다. 전통적인 조작 방식입니다.",
+      "classicDesc": "우클릭을 누른 채 마우스를 움직여 시점을 돌립니다.",
       "changeLater": "이 설정은 나중에 Esc 메뉴의 키 설정에서 변경할 수 있습니다.",
       "confirm": "확인"
     },

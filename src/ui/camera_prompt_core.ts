@@ -1,15 +1,14 @@
-// Pure, host-agnostic decision logic for the first-run camera-mode prompt (issue
+// Pure, host-agnostic decision core for the first-run camera-mode prompt (issue
 // #1727). No DOM and no imports: it takes primitive inputs and returns the policy,
-// so a Vitest can pin "when do we show it" and "what does each choice set" directly.
-// The DOM modal (camera_prompt.ts) is the thin consumer that reads the live touch
-// state plus the localStorage flag, then renders and applies through these helpers.
+// so a Vitest can pin when to show it and what each choice applies directly. The
+// DOM modal in camera_prompt.ts is the thin consumer.
 
 export type CameraModeChoice = 'classic' | 'mouse';
 
-// Mouse Camera is the recommended default (issue #1727): most newcomers prefer
-// modern mouse-driven camera controls, so it is the pre-selected option and the
-// value confirming with no change applies.
-export const RECOMMENDED_CAMERA_CHOICE: CameraModeChoice = 'mouse';
+// Classic Camera is the neutral first/default choice. The prompt explains both
+// modes without recommending either one; confirming without changing the radio
+// therefore preserves the game's classic right-click camera behavior.
+export const DEFAULT_CAMERA_CHOICE: CameraModeChoice = 'classic';
 
 export interface CameraPromptContext {
   // The on-screen touch/joystick interface is active (a phone, or a device forced

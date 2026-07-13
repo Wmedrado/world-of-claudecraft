@@ -213,7 +213,7 @@ describe('tick perf capture lifecycle', () => {
 
   it('registers every mob.update per-zone bucket so its timing is never silently dropped', () => {
     // TickProfiler.add() ignores an unregistered phase. The per-zone mob.update buckets
-    // (issue #1833) are host-derived, so unlike SIM_LAP_PHASES the sim never emits them;
+    // are host-derived, so unlike SIM_LAP_PHASES the sim never emits them;
     // pin that the GameServer profiler registered ALL of them, or a mob.update split
     // would vanish from the report.
     const server = new GameServer();
@@ -241,5 +241,34 @@ describe('tick perf capture lifecycle', () => {
     expect(at(0, (ZONES[0].zMin + ZONES[0].zMax) / 2)).not.toBe(
       at(0, (ZONES[1].zMin + ZONES[1].zMax) / 2),
     );
+  });
+
+  it('records the injected GameServer mob lap in both total and zone phases', () => {
+    const server = new GameServer();
+    server.startPerfCapture(3000);
+    const mob = [...server.sim.entities.values()].find((entity) => entity.kind === 'mob');
+    if (!mob) throw new Error('fresh GameServer world did not spawn a mob');
+
+    const perfLap = (
+      server.sim as unknown as {
+        cfg: { perfLap?: (phase: string, entity?: Entity) => void };
+      }
+    ).cfg.perfLap;
+    if (!perfLap) throw new Error('GameServer did not inject its sim perf probe');
+
+    const internal = server as unknown as {
+      simLapMark: bigint;
+      tickProfiler: {
+        commit(ms: number): void;
+        profile(): { phases: Record<string, { mean: number }> };
+      };
+    };
+    internal.simLapMark = process.hrtime.bigint() - 5_000_000n;
+    perfLap('mob.update', mob);
+    internal.tickProfiler.commit(8);
+
+    const phases = internal.tickProfiler.profile().phases;
+    expect(phases['sim.mob.update'].mean).toBeGreaterThan(0);
+    expect(phases[mobZonePhase(mob)].mean).toBeGreaterThan(0);
   });
 });

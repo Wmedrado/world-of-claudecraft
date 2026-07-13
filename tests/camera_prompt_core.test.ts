@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   cameraChoiceEnablesMouseCamera,
-  RECOMMENDED_CAMERA_CHOICE,
+  DEFAULT_CAMERA_CHOICE,
   shouldShowCameraPrompt,
-} from '../src/ui/camera_prompt_decision';
+} from '../src/ui/camera_prompt_core';
 
 describe('first-run camera prompt decision', () => {
   describe('shouldShowCameraPrompt', () => {
@@ -40,9 +40,8 @@ describe('first-run camera prompt decision', () => {
     });
   });
 
-  it('Mouse Camera is the recommended pre-selected choice', () => {
-    expect(RECOMMENDED_CAMERA_CHOICE).toBe('mouse');
-    // The recommended default must be the one that enables the modern scheme.
-    expect(cameraChoiceEnablesMouseCamera(RECOMMENDED_CAMERA_CHOICE)).toBe(true);
+  it('defaults to Classic Camera without presenting either choice as recommended', () => {
+    expect(DEFAULT_CAMERA_CHOICE).toBe('classic');
+    expect(cameraChoiceEnablesMouseCamera(DEFAULT_CAMERA_CHOICE)).toBe(false);
   });
 });

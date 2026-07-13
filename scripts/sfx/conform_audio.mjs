@@ -229,16 +229,21 @@ export function conformSfxAudio({
 
 export function inspectSfxConformance(file, { ffmpegPath, ffprobePath }) {
   const stats = probeSfxAudio(file, ffprobePath);
-  const isLossless = LOSSLESS_EXTENSIONS.has(extname(file).toLowerCase());
-  const preliminary = classify({ ...stats, isLossless });
-  if (preliminary.reject) return { ...stats, isLossless, ...preliminary, peakDb: null, lufs: null };
+  const extension = extname(file);
+  const isLossless = LOSSLESS_EXTENSIONS.has(extension.toLowerCase());
+  const isMp3 = extension === '.mp3' && stats.codec.toLowerCase() === 'mp3';
+  const preliminary = classify({ ...stats, isLossless, isMp3 });
+  if (preliminary.reject) {
+    return { ...stats, isLossless, isMp3, ...preliminary, peakDb: null, lufs: null };
+  }
   const peakDb = preliminary.normBranch === 'peak' ? measureSfxTruePeakDb(file, ffmpegPath) : null;
   const lufs = preliminary.normBranch === 'lufs' ? measureSfxLufs(file, ffmpegPath) : null;
   return {
     ...stats,
     isLossless,
+    isMp3,
     peakDb,
     lufs,
-    ...classify({ ...stats, isLossless, peakDb, lufs }),
+    ...classify({ ...stats, isLossless, isMp3, peakDb, lufs }),
   };
 }

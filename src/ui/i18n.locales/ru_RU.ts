@@ -5800,11 +5800,10 @@ export const ru_RU: Partial<Record<TranslationKey, string>> = {
   'hudChrome.cameraPrompt.title': 'Выберите камеру',
   'hudChrome.cameraPrompt.intro': 'Выберите, как камера следует за персонажем.',
   'hudChrome.cameraPrompt.mouseDesc':
-    'Двигайте мышью, чтобы поворачивать камеру. Современное управление, которое предпочитает большинство новичков.',
-  'hudChrome.cameraPrompt.recommended': 'Рекомендуется',
+    'Двигайте мышью, чтобы поворачивать камеру, не удерживая кнопку.',
   'hudChrome.cameraPrompt.classicTitle': 'Классическая камера',
   'hudChrome.cameraPrompt.classicDesc':
-    'Удерживайте правую кнопку мыши, чтобы поворачивать камеру. Классическая схема управления.',
+    'Удерживайте правую кнопку мыши и двигайте мышью, чтобы поворачивать камеру.',
   'hudChrome.cameraPrompt.changeLater': 'Это можно изменить позже в меню Esc, раздел «Клавиши».',
   'hudChrome.cameraPrompt.confirm': 'Подтвердить',
   'desktop.update.downloading': 'Загрузка обновления {version}...',

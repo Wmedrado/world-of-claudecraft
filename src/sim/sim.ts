@@ -677,10 +677,9 @@ export interface ArenaMatch {
   state: 'countdown' | 'active' | 'over';
   timer: number; // countdown remaining, then elapsed once active, then return countdown
   returns: Map<number, { x: number; z: number; facing: number }>;
-  // Pre-match HP/resource/cooldown pools keyed by pid, restored on return so the
-  // bout is never a free full-restore (issue #1600). Set only by the ranked/fiesta
-  // startArenaMatch path; yumi matches share this type but leave it undefined
-  // (they keep the legacy full-heal-on-return), so it is optional.
+  // Pre-match HP/resource/cooldown/CC DR pools keyed by pid, restored on return
+  // so no arena format can be farmed as a free full-restore (issue #1600).
+  // Optional only for compatibility with synthetic/legacy ArenaMatch fixtures.
   preMatchPools?: Map<number, ArenaReturnPools>;
   ratingA: number; // team avg at start
   ratingB: number;
@@ -3569,7 +3568,7 @@ export class Sim {
     // this is a no-op there; it draws no rng and mutates nothing either way, keeping
     // the tick deterministic. The server injects it for its on-demand tick profiler.
     // The mob loop additionally passes the mob it just updated as a sub-phase tag so
-    // the host can split mob.update per zone (issue #1833); every other call omits it.
+    // the host can split mob.update per zone; every other call omits it.
     const lap = this.cfg.perfLap;
     this.updatePendingMobRespawns();
     lap?.('respawns');
@@ -3629,7 +3628,7 @@ export class Sim {
       if (e.kind === 'mob') {
         this.updateMob(e);
         // Tag the mob.update lap with the mob so the host can attribute this slice
-        // of the phase cost to its zone/group (issue #1833). The sim reads nothing
+        // of the phase cost to its zone/group. The sim reads nothing
         // from it and allocates nothing, so this stays behavior- and parity-inert.
         lap?.('mob.update', e);
         updateAuras(this.ctx, e);

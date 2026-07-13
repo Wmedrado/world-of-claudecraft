@@ -39,6 +39,7 @@ import { sanitizeMarketQuery } from '../src/sim/market_query';
 import { parseMoveInputFrame } from '../src/sim/move_input';
 import type { PetState, PlayerMeta } from '../src/sim/sim';
 import { MAX_CHAT_MESSAGE_LEN, Sim } from '../src/sim/sim';
+import type { VcMatch } from '../src/sim/social/vale_cup';
 import { stealthDetectionRadius, threatEntries } from '../src/sim/threat';
 import {
   type Aura,
@@ -269,7 +270,7 @@ export const SIM_LAP_PHASES = [
   'gridRefresh',
 ].map((n) => `sim.${n}`);
 
-// Per-zone attribution buckets for the mob.update phase (issue #1833). The mob loop
+// Per-zone attribution buckets for the mob.update phase. The mob loop
 // tags each mob.update lap with its entity; the host splits that slice of the phase
 // time by the mob's zone/group so a stall localizes to "which zone froze" instead of
 // only the phase total. These are HOST-DERIVED (the sim never emits them), so they are
@@ -1056,6 +1057,10 @@ export class GameServer {
   private playtimeInterval: NodeJS.Timeout | null = null;
   private lastPlaytimeGrantAt = new Map<number, number>(); // accountId -> sim time of last grant
   private dailyRewardActivityInterval: NodeJS.Timeout | null = null;
+  private readonly valeCupRewardCompletions = new WeakMap<
+    VcMatch,
+    { completionId: string; completedAtIso: string }
+  >();
   private relayCooldown = new Map<number, number>(); // accountId -> last "!" relay post (ms)
   // pids whose holder tier was forced via the dev /woctier command — the chain
   // refresh leaves them alone so the override sticks during testing (dev only).
@@ -1098,7 +1103,7 @@ export class GameServer {
     // Populated only while the detailed capture is active (an on-demand admin
     // capture or PERF_TICK_LOG=1); zero otherwise.
     ...SIM_LAP_PHASES,
-    // Per-zone breakdown of the mob.update phase (issue #1833), same gating.
+    // Per-zone breakdown of the mob.update phase, with the same capture gating.
     ...SIM_MOB_ZONE_PHASES,
   ]);
   // Detailed-timing switch. When true, the per-client broadcast sub-phase timing
@@ -1161,7 +1166,7 @@ export class GameServer {
         const dt = Number(t - this.simLapMark) / 1e6;
         this.tickProfiler.add(`sim.${phase}`, dt);
         // The mob loop tags each mob.update lap with its entity, so the SAME measured
-        // slice also lands in that mob's per-zone bucket (issue #1833). One clock read,
+        // slice also lands in that mob's per-zone bucket. One clock read,
         // no extra wall-clock, no sim-side work: a mob.update blowup now localizes to a
         // zone in the same [perf.sim] report instead of only the phase total.
         if (entity !== undefined) this.tickProfiler.add(mobZonePhase(entity), dt);
@@ -2969,7 +2974,7 @@ export class GameServer {
       const fmtMean = (n: string) => `${n.slice(4)}=${p[n].mean}/${p[n].p95}/${p[n].max}`;
       console.log(`[perf.sim] mean/p95/max ${simPhases.slice(0, 14).map(fmtMean).join(' ')}`);
     }
-    // Per-zone split of mob.update (issue #1833), mean-sorted so the zone eating the
+    // Per-zone split of mob.update, mean-sorted so the zone eating the
     // phase leads. Only prints when the mob.update cost is actually attributed to a
     // zone, so a normal tick stays quiet.
     const zonePhases = SIM_MOB_ZONE_PHASES.filter((n) => p[n] && p[n].mean > 0).sort(
@@ -4855,6 +4860,20 @@ export class GameServer {
     return REALM_PUBLIC_ORIGIN ? `${REALM_PUBLIC_ORIGIN}/c/${encodeURIComponent(name)}` : null;
   }
 
+  private valeCupRewardCompletion(match: VcMatch): {
+    completionId: string;
+    completedAtIso: string;
+  } {
+    const existing = this.valeCupRewardCompletions.get(match);
+    if (existing) return existing;
+    const completion = {
+      completionId: randomUUID(),
+      completedAtIso: new Date().toISOString(),
+    };
+    this.valeCupRewardCompletions.set(match, completion);
+    return completion;
+  }
+
   // Scan a tick's events for "significant activity" (max-level ding, rare drop,
   // duel result, arena win) and enqueue a card for the Discord bot to post. The
   // drain endpoint resolves which players are linked and tags them; the queue
@@ -5024,6 +5043,7 @@ export class GameServer {
           practice || [...match.rosterA, ...match.rosterB].some((player) => player.bot);
         if (!match.rated && !matchHasBots) continue;
         if (!ev.won) continue;
+        const completion = this.valeCupRewardCompletion(match);
         void dailyRewardService
           .recordValeCupResult(s.accountId, {
             won: true,
@@ -5032,6 +5052,8 @@ export class GameServer {
             rated: match.rated,
             hasBots: matchHasBots,
             practice,
+            completionId: completion.completionId,
+            completedAt: new Date(completion.completedAtIso),
           })
           .then((points) => {
             if (points > 0) this.sendDailyRewardPointsGained(s, points);

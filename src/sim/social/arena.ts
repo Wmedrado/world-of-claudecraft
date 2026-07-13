@@ -49,6 +49,15 @@ function cloneCcDr(
   return out;
 }
 
+export function snapshotArenaReturnPools(e: Entity): ArenaReturnPools {
+  return {
+    hp: e.hp,
+    resource: e.resource,
+    cooldowns: new Map(e.cooldowns),
+    ccDr: cloneCcDr(e.ccDr),
+  };
+}
+
 // Ashen Coliseum 1v1 arena tuning consts (moved with the slice). FIESTA_COUNTDOWN
 // is the only Fiesta const the ranked match-start path needs; the rest of the
 // Fiesta tuning stays on Sim with createFiestaState (A3).
@@ -755,12 +764,7 @@ export function startArenaMatch(
   for (let i = 0; i < allPids.length; i++) {
     const e = entities[i]!;
     returns.set(allPids[i], { x: e.pos.x, z: e.pos.z, facing: e.facing });
-    preMatchPools.set(allPids[i], {
-      hp: e.hp,
-      resource: e.resource,
-      cooldowns: new Map(e.cooldowns),
-      ccDr: cloneCcDr(e.ccDr),
-    });
+    preMatchPools.set(allPids[i], snapshotArenaReturnPools(e));
   }
   const isFiesta = format === 'fiesta';
   const countdown = isFiesta ? FIESTA_COUNTDOWN : ARENA_COUNTDOWN;
@@ -1055,12 +1059,11 @@ export function returnFromArena(ctx: SimContext, match: ArenaMatch): void {
     }
     resetForArena(ctx, e);
     // The bout is a parenthesis, not a rest stop: undo the clean-slate full
-    // restore and hand back exactly the HP, resource, and cooldowns the fighter
+    // restore and hand back exactly the HP, resource, cooldowns, and CC DR the fighter
     // carried in, so an arena match can never be farmed as a free heal, mana
     // refill, or cooldown reset (issue #1600). recalcPlayerStats already ran
     // inside resetForArena, so maxHp/maxResource are current for the clamp. Auras
-    // stay cleared (the documented arena clean-slate). Yumi matches leave
-    // preMatchPools undefined and keep the legacy full heal.
+    // stay cleared (the documented arena clean-slate).
     const pools = match.preMatchPools?.get(pid);
     if (pools) {
       e.cooldowns = new Map(pools.cooldowns);

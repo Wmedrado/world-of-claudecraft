@@ -4,9 +4,10 @@
 // <key>_2.mp3, and so on. The runtime cycles those files in numeric order.
 // Human-readable design + spatial behaviour: docs/design/sound_effects.md.
 //
-// stereo: true keeps the published asset two-channel. It is set ONLY on the
-// ambience loops, whose L/R width is audible and which never pass through a
-// positional panner. Every other cue is mono (positional playAt downmixes to
+// stereo: true keeps the published asset two-channel. It is set only on global
+// ambience beds whose L/R width is audible and which never pass through a
+// positional panner. Point ambience (campfire/forge) and every other cue are
+// mono (positional playAt downmixes to
 // mono, personal playUi sums to the mono master), so the conform step in
 // gen_sfx.mjs encodes it single-channel. This is the channel half of the asset
 // standard checked by scripts/sfx_conform.mjs and documented in
@@ -441,14 +442,12 @@ export const SFX = [
     key: 'amb_campfire',
     duration: 5,
     loop: true,
-    stereo: true,
     prompt: 'A crackling campfire with popping embers and steady flames. Seamless loop, no music.',
   },
   {
     key: 'amb_forge',
     duration: 6,
     loop: true,
-    stereo: true,
     prompt:
       'A blacksmith forge: a roaring furnace with rhythmic hammer strikes ringing on an anvil. Seamless loop, no music.',
   },

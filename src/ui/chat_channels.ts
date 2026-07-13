@@ -48,12 +48,14 @@ export type ChatTabId = 'all' | 'combat' | ChatOpenTab;
 // Slash prefix prepended to plain text typed while a channel tab is active, so a
 // message reaches that channel without the player retyping the command. These
 // mirror the commands parsed in src/sim/sim.ts and server/game.ts:
-//  - `say` is empty: unprefixed text is /say by default.
+//  - `say` is explicit: online sessions remember whisper/guild modes, so a
+//    neutral Say input must reset that server-side state instead of relying on
+//    unprefixed text.
 //  - `/general ` (not `/g `, which the server routes to GUILD) hits the
 //    always-on general channel.
 //  - `/gu ` / `/o ` are guild / officer (server-side social channels).
 const CHANNEL_SEND_PREFIX: Record<ChatTabChannel, string> = {
-  say: '',
+  say: '/say ',
   yell: '/y ',
   party: '/p ',
   general: '/general ',

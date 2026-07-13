@@ -175,44 +175,53 @@ function resolveByCode(code: string, params: Record<string, unknown> | undefined
   return t(key);
 }
 
-// A failed fetch (the server is unreachable: connection refused, DNS failure, the device
-// is offline, or a dev run started without `npm run server`) rejects with a TypeError, not
-// an ApiError: it carries no HTTP status and no stable code, so neither layer below would
-// recognize it and the raw browser string ("Failed to fetch") would leak into the
-// login/register form (issue #1737). Engines word it differently ("Failed to fetch" on
-// Chromium, "NetworkError when attempting to fetch resource." on Firefox, "Load failed" on
-// Safari; Node/undici says "fetch failed"), so match the known transport-failure messages
-// rather than one engine's wording.
-const TRANSPORT_FAILURE_PATTERNS = [
+// A failed fetch (connection refused, DNS failure, or an offline device) rejects
+// with a TypeError and no stable error code. Engines word that TypeError differently,
+// so recognize their known messages without treating arbitrary application Errors
+// containing words such as "load failed" as transport failures.
+const TRANSPORT_FAILURE_MESSAGES = new Set([
   'failed to fetch',
-  'networkerror', // Firefox: "NetworkError when attempting to fetch resource."
   'load failed', // Safari
   'fetch failed', // Node / undici (the underlying cause is e.g. ECONNREFUSED)
   'network request failed',
   'the network connection was lost',
-];
+]);
 
-// True only for a transport/connection failure that never reached the server. An ApiError
-// (any numeric HTTP status, including a real 5xx from a server that DID answer) is not one:
-// those stay English diagnostics by design.
+// True for a fetch transport failure, or for the empty gateway response produced
+// when a reverse/dev proxy cannot reach its backend. An explicit server error body
+// remains a diagnostic even when it uses the same gateway status.
 function isTransportFailure(err: unknown): boolean {
-  if (err && typeof err === 'object' && typeof (err as { status?: unknown }).status === 'number') {
-    return false;
+  // A problem body with a stable code came from the application server. RFC
+  // problem bodies omit the legacy `error` field, so ApiError's message is the
+  // same generic status text as an empty proxy response; the code is what
+  // distinguishes those cases.
+  if (errorCode(err) !== undefined) return false;
+  const status =
+    err && typeof err === 'object' && typeof (err as { status?: unknown }).status === 'number'
+      ? (err as { status: number }).status
+      : undefined;
+  const message = technicalErrorMessage(err).trim().toLowerCase();
+  if (status !== undefined) {
+    return (
+      (status === 502 || status === 503 || status === 504) &&
+      message === `request failed (${status})`
+    );
   }
-  const message = technicalErrorMessage(err).toLowerCase();
-  return TRANSPORT_FAILURE_PATTERNS.some((pattern) => message.includes(pattern));
+  if (!(err instanceof TypeError)) return false;
+  const normalized = message.replace(/[.!]+$/, '');
+  return normalized.includes('networkerror') || TRANSPORT_FAILURE_MESSAGES.has(normalized);
 }
 
 export function userFacingApiError(err: unknown): string {
-  // The server was unreachable (fetch rejected). Surface the same localized connection
-  // message the WebSocket-drop path already uses, not the raw browser diagnostic.
-  if (isTransportFailure(err)) return t('loading.connectionLost');
-
   const code = errorCode(err);
   if (code) {
     const byCode = resolveByCode(code, errorParams(err));
     if (byCode !== null) return byCode;
   }
+
+  // The server was unreachable (fetch rejected). Surface the same localized connection
+  // message the WebSocket-drop path already uses, not the raw browser diagnostic.
+  if (isTransportFailure(err)) return t('loading.connectionLost');
 
   // --- Prose fallback (old-ladder routes, until the ladder is removed). Moved verbatim from
   // src/main.ts; each arm re-localizes a stable English source string. ---

@@ -2734,7 +2734,7 @@ export interface SimConfig {
   // server injects it to feed its tick profiler during an on-demand capture; undefined
   // offline/headless, so the sim draws no wall clock in a deterministic scenario.
   // The optional `entity` is a SUB-phase tag: the mob loop passes the mob it just
-  // updated so the host can split the mob.update cost per zone/group (issue #1833)
+  // updated so the host can split the mob.update cost per zone/group
   // without a second clock read or any per-mob work inside the sim. Every other lap
   // omits it. Passing a reference allocates nothing and stays behavior-inert (the
   // host reads it, the sim never does), so the parity/determinism gates are untouched.

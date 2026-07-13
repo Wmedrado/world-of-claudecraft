@@ -6,16 +6,14 @@ import type { Entity } from '../src/sim/types';
 
 const WORLD_SEED = 20061;
 const CLUSTER = { x: 0, z: 60 };
-// Enough clustered engaged mobs to land the total entity population near the
-// production incident's ~750 (the fresh world already spawns ~400 mobs/npcs/objects
-// and this adds 100 players + the pack).
+// Enough clustered engaged mobs to exercise a high-load realm shape (the fresh
+// world already spawns ~400 mobs/npcs/objects and this adds 100 players + the pack).
 const PACK = 250;
 const PLAYERS = 100;
 
-// Build the incident shape: ~100 players packed into one spot, engaged by a dense
-// pack of mobs each carrying a deep hate table (the big-pull case where every mob's
-// per-tick target scan walks a ~100-entry threat map). This is the "clustered
-// engaged mobs" pile-up the mob.update phase is suspected to go superlinear on.
+// Build a deliberately hostile shape: ~100 players packed into one spot, engaged by
+// a dense pack of mobs each carrying a deep hate table (the big-pull case where every
+// mob's per-tick target scan walks a ~100-entry threat map).
 function buildPileup(): { sim: Sim; players: number[]; entities: number } {
   const sim = new Sim({ seed: WORLD_SEED, playerClass: 'warrior', noPlayer: true });
   const players: number[] = [];
@@ -57,7 +55,7 @@ function buildPileup(): { sim: Sim; players: number[]; entities: number } {
   return { sim, players, entities: sim.entities.size };
 }
 
-describe('mob.update stays within budget under a clustered-crowd pile-up', () => {
+describe('mob.update high-load regression budget', () => {
   it('bounds mob.update per-tick cost and tags every mob lap for zone attribution', () => {
     const { sim, entities } = buildPileup();
 
@@ -96,8 +94,8 @@ describe('mob.update stays within budget under a clustered-crowd pile-up', () =>
     // The budget asserts on the MEDIAN tick, not the mean: this suite runs alongside
     // other Vitest workers, so a one-off GC/scheduling pause can spike a single tick
     // by 50x. The median reflects the steady-state per-tick cost and rejects those
-    // outliers, so the gate catches a SUSTAINED superlinear regression (what the
-    // incident was) instead of flaking on isolated noise.
+    // outliers, so the gate catches a sustained regression instead of flaking on
+    // isolated noise.
     samples.sort((a, b) => a - b);
     const medianMobUpdate = samples[Math.floor(samples.length / 2)];
     const meanMobUpdate = samples.reduce((s, v) => s + v, 0) / samples.length;
@@ -118,8 +116,7 @@ describe('mob.update stays within budget under a clustered-crowd pile-up', () =>
     );
 
     // Instrumentation contract: the sim tags EVERY mob.update lap with its entity so
-    // the host can split the phase time per zone. Without this the incident (#1833)
-    // is undiagnosable from logs.
+    // the host can split the phase time per zone.
     expect(mobLapTotal).toBeGreaterThan(0);
     expect(mobLapWithEntity).toBe(mobLapTotal);
 
@@ -131,9 +128,8 @@ describe('mob.update stays within budget under a clustered-crowd pile-up', () =>
 
     // Per-tick budget. Generous by design: the healthy median at this population is a
     // few ms (observed ~2-3 ms), so a 30 ms median bound (still under one 20 Hz tick,
-    // 50 ms) leaves ~10x headroom for slow/contended CI hardware while still failing on
-    // the ~25x superlinear blowup the incident hit (~98 ms mean, and a 25x regression of
-    // the healthy cost is ~60 ms+). It gates the SUSTAINED per-tick cost, not one-off noise.
+    // 50 ms) leaves ample headroom for slow/contended CI hardware while still catching
+    // a sustained order-of-magnitude regression.
     expect(medianMobUpdate).toBeLessThan(30);
   }, 60_000);
 });

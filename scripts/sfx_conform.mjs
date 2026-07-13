@@ -2,7 +2,7 @@
 //   MP3, 192 kbps, 44.1 kHz
 //   duration < 1 s:  -6 dBFS true peak
 //   duration >= 1 s: -14 LUFS
-//   channels: mono, except catalog entries flagged stereo (ambience loops)
+//   channels: mono, except catalog entries flagged stereo (global ambience beds)
 //   filename: a catalog key, a numbered variant, or a mob subfamily file
 //
 // Lossless sources always transcode and skip the lossy bitrate floor. Lossy
@@ -28,9 +28,9 @@ import {
   inspectSfxConformance,
   SFX_AUDIO_EXTENSIONS,
 } from './sfx/conform_audio.mjs';
+import { buildSfxConformPolicy } from './sfx/sfx_conform_inventory.mjs';
 import {
   channelProblem,
-  expectedChannelsForEntry,
   LOSSLESS_EXTENSIONS,
   MIN_SOURCE_BITRATE,
   TARGET_LUFS,
@@ -57,21 +57,11 @@ const { entries: discoveredEntries, errors: discoveryErrors } = discoverSfxTrack
   SFX,
   sfxDirectory,
 );
-const catalogByKey = new Map(SFX.map((entry) => [entry.key, entry]));
-const expectedChannelsByFilename = new Map();
-const recognizedFilenames = new Set();
-for (const entry of Object.values(discoveredEntries)) {
-  // A non-catalog entry is a mob subfamily extension: a positional voice, so mono.
-  const expected = expectedChannelsForEntry(catalogByKey.get(entry.key));
-  for (const track of entry.tracks) {
-    recognizedFilenames.add(track.filename);
-    expectedChannelsByFilename.set(track.filename, expected);
-  }
-}
+const conformPolicy = buildSfxConformPolicy(SFX, discoveredEntries, allFiles);
 
-const namingViolations = [];
+const namingViolations = [...conformPolicy.violations];
 for (const filename of allFiles) {
-  if (!recognizedFilenames.has(filename)) {
+  if (!conformPolicy.recognizes(filename)) {
     namingViolations.push(
       `${filename}: not a catalog key, numbered variant, or mob subfamily file`,
     );
@@ -83,9 +73,15 @@ for (const error of discoveryErrors) namingViolations.push(error);
 // are ambiguous and must be resolved by the author.
 const byStem = new Map();
 const conflicts = [];
+const conflictedStems = new Set();
 for (const filename of allFiles) {
-  const extension = path.extname(filename).toLowerCase();
-  const stem = path.basename(filename, extension);
+  const sourceExtension = path.extname(filename);
+  const extension = sourceExtension.toLowerCase();
+  const stem = path.basename(filename, sourceExtension);
+  if (conflictedStems.has(stem)) {
+    console.log(`  ERROR ${stem}: additional source ${filename} ignored after duplicate conflict`);
+    continue;
+  }
   const existing = byStem.get(stem);
   if (!existing) {
     byStem.set(stem, filename);
@@ -102,6 +98,7 @@ for (const filename of allFiles) {
   } else {
     console.log(`  ERROR ${stem}: ambiguous duplicate (${existing} vs ${filename})`);
     byStem.delete(stem);
+    conflictedStems.add(stem);
     conflicts.push(stem);
   }
 }
@@ -112,12 +109,18 @@ let toConform = 0; // files that need a conform pass (loudness or channel), for 
 let fixed = 0;
 let failures = 0;
 let rejected = 0;
+let blocked = 0;
 const channelViolations = []; // advisory unless --strict; reported once, in the summary
 
 for (const filename of files) {
+  if (fix && !conformPolicy.recognizes(filename)) {
+    console.log(`  SKIP ${filename}  [invalid or noncontiguous SFX source filename]`);
+    blocked++;
+    continue;
+  }
   const file = path.join(sfxDirectory, filename);
-  const extension = path.extname(filename).toLowerCase();
-  const stem = path.basename(filename, extension);
+  const sourceExtension = path.extname(filename);
+  const stem = path.basename(filename, sourceExtension);
   const outputFile = path.join(sfxDirectory, `${stem}.mp3`);
   const report = inspectSfxConformance(file, { ffmpegPath, ffprobePath });
 
@@ -129,7 +132,7 @@ for (const filename of files) {
     continue;
   }
 
-  const expectedChannels = expectedChannelsByFilename.get(filename);
+  const expectedChannels = conformPolicy.expectedChannels(filename);
   const chProblem = expectedChannels ? channelProblem(report.channels, expectedChannels) : null;
   if (chProblem) channelViolations.push(`${filename}  [${chProblem}]`);
 
@@ -189,7 +192,7 @@ if (rejected > 0) {
 }
 if (fix) {
   console.log(
-    `${fixed}/${toConform} files conformed. ${files.length - toConform - rejected} already at spec.`,
+    `${fixed}/${toConform} files conformed. ${files.length - toConform - rejected - blocked} already at spec.`,
   );
 } else if (loudnessIssues > 0) {
   console.log(
@@ -220,6 +223,7 @@ if (
   failures > 0 ||
   conflicts.length > 0 ||
   rejected > 0 ||
+  blocked > 0 ||
   (!fix && loudnessIssues > 0) ||
   strictFailures > 0
 ) {

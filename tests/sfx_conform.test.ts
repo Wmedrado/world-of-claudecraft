@@ -1,5 +1,5 @@
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,8 +24,16 @@ import {
 } from '../scripts/sfx/sfx_conform_rules.mjs';
 import { SFX } from '../scripts/sfx/sfx_prompts.mjs';
 
-const { buildSfxConformArgs, conformSfxAudio, inspectSfxConformance, measureSfxTruePeakDb } =
-  conformAudioModule;
+const {
+  buildSfxConformArgs,
+  conformSfxAudio,
+  inspectSfxConformance,
+  measureSfxTruePeakDb,
+  SFX_AUDIO_EXTENSIONS,
+} = conformAudioModule;
+
+import { buildSfxConformPolicy } from '../scripts/sfx/sfx_conform_inventory.mjs';
+import { PROBE_EXTENSIONS } from '../scripts/sfx/sfx_manifest_builder.mjs';
 
 // @ts-expect-error scripts use the repository's untyped Node ESM convention
 import { UI_SFX_SPECS } from '../scripts/sfx/ui_sfx.mjs';
@@ -76,6 +84,16 @@ describe('classify: bitrate and sample rate', () => {
   it('flags sample rate mismatch', () => {
     const { problems } = classify({ ...AT_SPEC, sampleRate: 48000 });
     expect(problems.some((p) => p.includes('48000Hz'))).toBe(true);
+  });
+
+  it('requires an otherwise conformant lossy source to be transcoded to MP3', () => {
+    const { reject, problems } = classify({
+      ...AT_SPEC,
+      isMp3: false,
+      lufs: TARGET_LUFS,
+    });
+    expect(reject).toBe(false);
+    expect(problems).toContain('non-MP3 source');
   });
 });
 
@@ -190,6 +208,65 @@ describe('shared conform command', () => {
       expect(report.bitrate, spec.key).toBe(TARGET_BITRATE);
     }
   });
+
+  it('fails strict conformance for an at-spec AAC source instead of publishing it', () => {
+    if (!ffmpegPath) throw new Error('ffmpeg-static is unavailable');
+    const directory = mkdtempSync(join(tmpdir(), 'wocc-sfx-lossy-source-'));
+    const sfxDirectory = join(directory, 'public/audio/sfx');
+    const inputFile = join(sfxDirectory, 'amb_water.m4a');
+
+    try {
+      mkdirSync(sfxDirectory, { recursive: true });
+      execFileSync(
+        ffmpegPath,
+        [
+          '-hide_banner',
+          '-loglevel',
+          'error',
+          '-nostdin',
+          '-y',
+          '-f',
+          'lavfi',
+          '-i',
+          'anoisesrc=color=pink:duration=3:sample_rate=44100',
+          '-af',
+          'loudnorm=I=-14:TP=-1:LRA=7',
+          '-ac',
+          '2',
+          '-ar',
+          String(TARGET_SAMPLE_RATE),
+          '-c:a',
+          'aac',
+          '-b:a',
+          `${TARGET_BITRATE}k`,
+          inputFile,
+        ],
+        { stdio: 'ignore' },
+      );
+
+      const source = inspectSfxConformance(inputFile, {
+        ffmpegPath,
+        ffprobePath: ffprobeStatic.path,
+      });
+      expect(source.codec).toBe('aac');
+      expect(source.bitrate).toBeGreaterThanOrEqual(TARGET_BITRATE);
+      expect(source.bitrate).toBeLessThanOrEqual(TARGET_BITRATE + 8);
+      expect(source.sampleRate).toBe(TARGET_SAMPLE_RATE);
+      expect(Math.abs(source.lufs - TARGET_LUFS)).toBeLessThanOrEqual(NORM_TOLERANCE);
+
+      const result = spawnSync(
+        process.execPath,
+        [join(ROOT, 'scripts/sfx_conform.mjs'), '--strict'],
+        { cwd: directory, encoding: 'utf8' },
+      );
+      expect(result.status).toBe(1);
+      expect(result.stdout).toContain('amb_water.m4a');
+      expect(existsSync(inputFile)).toBe(true);
+      expect(existsSync(join(sfxDirectory, 'amb_water.mp3'))).toBe(false);
+    } finally {
+      rmSync(directory, { force: true, recursive: true });
+    }
+  });
 });
 
 describe('classify: loudness gate', () => {
@@ -291,6 +368,166 @@ describe('classify: lossless sources', () => {
       expect(LOSSLESS_EXTENSIONS.has(ext)).toBe(false);
     }
   });
+
+  it('keeps manifest discovery aligned with every format accepted by conform', () => {
+    expect(new Set(PROBE_EXTENSIONS)).toEqual(SFX_AUDIO_EXTENSIONS);
+  });
+
+  it('inherits catalog channel policy by stem when lossless wins over an MP3', () => {
+    const policy = buildSfxConformPolicy([{ key: 'foot_grass' }], {
+      foot_grass: {
+        key: 'foot_grass',
+        tracks: [{ filename: 'foot_grass.mp3' }],
+      },
+    });
+    expect(policy.recognizes('foot_grass.aiff')).toBe(true);
+    expect(policy.expectedChannels('foot_grass.aiff')).toBe(TARGET_MONO_CHANNELS);
+  });
+
+  it('recognizes a bare lossless master shadowed by numbered runtime takes', () => {
+    const policy = buildSfxConformPolicy([{ key: 'foot_grass' }], {
+      foot_grass: {
+        key: 'foot_grass',
+        tracks: [{ filename: 'foot_grass_1.mp3' }],
+      },
+    });
+    expect(policy.recognizes('foot_grass.aiff')).toBe(true);
+    expect(policy.expectedChannels('foot_grass.aiff')).toBe(TARGET_MONO_CHANNELS);
+  });
+
+  it('recognizes numbered lossless catalog sources before an MP3 is published', () => {
+    const policy = buildSfxConformPolicy([{ key: 'foot_grass' }], {});
+    expect(policy.recognizes('foot_grass_1.aiff')).toBe(true);
+    expect(policy.expectedChannels('foot_grass_1.aiff')).toBe(TARGET_MONO_CHANNELS);
+  });
+
+  it('recognizes lossless dynamic mob variants before an MP3 is published', () => {
+    const policy = buildSfxConformPolicy([], {});
+    expect(policy.recognizes('mob_beast_dire_wolf_attack_1.aiff')).toBe(true);
+    expect(policy.expectedChannels('mob_beast_dire_wolf_attack_1.aiff')).toBe(TARGET_MONO_CHANNELS);
+  });
+
+  it('matches manifest grammar for catalog and dynamic source variant names', () => {
+    const policy = buildSfxConformPolicy([{ key: 'foot_grass' }], {});
+    const invalid = [
+      'foot_grass_9007199254740992.aiff',
+      'mob_Beast_dire_wolf_attack_1.aiff',
+      'mob_beast_dire-wolf_attack_1.aiff',
+      'mob_unknown_dire_wolf_attack_1.aiff',
+      'mob_beast_dire_wolf_attack_9007199254740992.aiff',
+    ];
+    for (const filename of invalid) {
+      expect(policy.recognizes(filename), filename).toBe(false);
+      expect(policy.expectedChannels(filename), filename).toBeUndefined();
+    }
+
+    expect(policy.recognizes('foot_grass_9007199254740991.aiff')).toBe(true);
+    expect(policy.recognizes('mob_beast_dire_wolf_attack_9007199254740991.aiff')).toBe(true);
+  });
+
+  it('rejects noncontiguous lossless catalog takes before they become MP3s', () => {
+    const policy = buildSfxConformPolicy([{ key: 'foot_grass' }], {}, ['foot_grass_2.aiff']);
+    expect(policy.recognizes('foot_grass_2.aiff')).toBe(false);
+    expect(policy.expectedChannels('foot_grass_2.aiff')).toBeUndefined();
+    expect(policy.violations).toEqual([expect.stringContaining('noncontiguous')]);
+  });
+
+  it('accepts a contiguous mixed-format source take sequence', () => {
+    const policy = buildSfxConformPolicy([{ key: 'foot_grass' }], {}, [
+      'foot_grass_1.aiff',
+      'foot_grass_2.wav',
+    ]);
+    expect(policy.recognizes('foot_grass_1.aiff')).toBe(true);
+    expect(policy.recognizes('foot_grass_2.wav')).toBe(true);
+    expect(policy.violations).toEqual([]);
+  });
+
+  it('does not let --fix publish a gap in catalog source takes', () => {
+    if (!ffmpegPath) throw new Error('ffmpeg-static is unavailable');
+    const directory = mkdtempSync(join(tmpdir(), 'wocc-sfx-source-gap-'));
+    const sfxDirectory = join(directory, 'public/audio/sfx');
+    const inputFile = join(sfxDirectory, 'foot_grass_2.aiff');
+    const outputFile = join(sfxDirectory, 'foot_grass_2.mp3');
+
+    try {
+      mkdirSync(sfxDirectory, { recursive: true });
+      execFileSync(
+        ffmpegPath,
+        [
+          '-hide_banner',
+          '-loglevel',
+          'error',
+          '-nostdin',
+          '-y',
+          '-f',
+          'lavfi',
+          '-i',
+          'sine=frequency=440:sample_rate=44100:duration=0.5',
+          '-c:a',
+          'pcm_s16be',
+          inputFile,
+        ],
+        { stdio: 'ignore' },
+      );
+
+      const result = spawnSync(process.execPath, [join(ROOT, 'scripts/sfx_conform.mjs'), '--fix'], {
+        cwd: directory,
+        encoding: 'utf8',
+      });
+      expect(result.status).toBe(1);
+      expect(existsSync(inputFile)).toBe(true);
+      expect(existsSync(outputFile)).toBe(false);
+    } finally {
+      rmSync(directory, { force: true, recursive: true });
+    }
+  });
+
+  it('does not publish a third source after a same-stem duplicate conflict', () => {
+    if (!ffmpegPath) throw new Error('ffmpeg-static is unavailable');
+    const directory = mkdtempSync(join(tmpdir(), 'wocc-sfx-source-conflict-'));
+    const sfxDirectory = join(directory, 'public/audio/sfx');
+    const sources = [
+      ['foot_grass.aiff', 'pcm_s16be'],
+      ['foot_grass.flac', 'flac'],
+      ['foot_grass.wav', 'pcm_s16le'],
+    ] as const;
+
+    try {
+      mkdirSync(sfxDirectory, { recursive: true });
+      for (const [filename, codec] of sources) {
+        execFileSync(
+          ffmpegPath,
+          [
+            '-hide_banner',
+            '-loglevel',
+            'error',
+            '-nostdin',
+            '-y',
+            '-f',
+            'lavfi',
+            '-i',
+            'sine=frequency=440:sample_rate=44100:duration=0.5',
+            '-c:a',
+            codec,
+            join(sfxDirectory, filename),
+          ],
+          { stdio: 'ignore' },
+        );
+      }
+
+      const result = spawnSync(process.execPath, [join(ROOT, 'scripts/sfx_conform.mjs'), '--fix'], {
+        cwd: directory,
+        encoding: 'utf8',
+      });
+      expect(result.status).toBe(1);
+      expect(existsSync(join(sfxDirectory, 'foot_grass.mp3'))).toBe(false);
+      for (const [filename] of sources) {
+        expect(existsSync(join(sfxDirectory, filename)), filename).toBe(true);
+      }
+    } finally {
+      rmSync(directory, { force: true, recursive: true });
+    }
+  });
 });
 
 describe('channel policy: pure rules', () => {
@@ -322,13 +559,24 @@ describe('channel policy: pure rules', () => {
 });
 
 describe('channel policy: catalog data', () => {
-  it('flags exactly the ambience loops as stereo', () => {
+  it('keeps stereo only for non-positional ambience beds', () => {
     const stereoKeys = SFX.filter((entry) => entry.stereo).map((entry) => entry.key);
-    const ambienceLoops = SFX.filter((entry) => entry.loop && entry.key.startsWith('amb_')).map(
-      (entry) => entry.key,
-    );
-    expect(stereoKeys.sort()).toEqual(ambienceLoops.sort());
+    const ambienceBeds = SFX.filter(
+      (entry) =>
+        entry.loop &&
+        entry.key.startsWith('amb_') &&
+        entry.key !== 'amb_campfire' &&
+        entry.key !== 'amb_forge',
+    ).map((entry) => entry.key);
+    expect(stereoKeys.sort()).toEqual(ambienceBeds.sort());
     expect(stereoKeys.length).toBeGreaterThan(0);
+  });
+
+  it('keeps positional campfire and forge loops mono', () => {
+    for (const key of ['amb_campfire', 'amb_forge']) {
+      const entry = SFX.find((candidate) => candidate.key === key);
+      expect(expectedChannelsForEntry(entry), key).toBe(TARGET_MONO_CHANNELS);
+    }
   });
 
   it('keeps every positional, one-shot, cast, voice, and UI cue mono', () => {

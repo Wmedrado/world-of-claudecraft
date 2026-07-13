@@ -88,6 +88,11 @@ export class MovableFrame {
     this.refreshBtn();
   }
 
+  /** Repaint the saved visual-space position against the live UI Scale. */
+  reapplyPosition(): void {
+    if (this.pos) this.applyPos();
+  }
+
   /** Snap the frame back to its stock CSS spot: forget the saved position,
    *  clear the inline styles, undo any detach (onPositioned(false)), and lock
    *  the frame. Wired to the "Reset Frame Positions" interface option. */

@@ -171,4 +171,26 @@ describe('releaseSelfFacing', () => {
     // one small step toward -3.0 the short (positive-wrapping) way
     expect(r.facing).toBeGreaterThan(3.0);
   });
+
+  it('clears the prior camera target before a release can be interrupted by re-engage', () => {
+    const staleTarget = 1.8;
+    const held = advanceSelfFacing(0, staleTarget, staleTarget, FRAME_60);
+    const released = releaseSelfFacing(held + 0.8, 0, FRAME_60);
+    expect(released.done).toBe(false);
+    expect(released.lastTarget).toBeNull();
+
+    // Orbit while the model is still converging from release, then re-engage.
+    // The reset target makes this a fresh engage gap, so it stays under the cap.
+    const reengageTarget = -2.4;
+    const next = advanceSelfFacing(
+      released.facing,
+      reengageTarget,
+      released.lastTarget ?? reengageTarget,
+      FRAME_60,
+    );
+    expect(Math.abs(wrapAngle(next - released.facing))).toBeCloseTo(
+      SELF_TURN_MAX_RATE * FRAME_60,
+      5,
+    );
+  });
 });

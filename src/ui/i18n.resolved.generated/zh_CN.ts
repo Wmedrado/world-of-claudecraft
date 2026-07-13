@@ -363,10 +363,9 @@ export const zh_CN: EnTranslations = {
     "cameraPrompt": {
       "title": "选择你的镜头",
       "intro": "选择镜头跟随角色的方式。",
-      "mouseDesc": "移动鼠标即可转动镜头。多数新手偏好的现代操作方式。",
-      "recommended": "推荐",
+      "mouseDesc": "无需按住鼠标按键，移动鼠标即可转动镜头。",
       "classicTitle": "经典镜头",
-      "classicDesc": "按住右键转动镜头。传统的操作方案。",
+      "classicDesc": "按住鼠标右键并移动鼠标来转动镜头。",
       "changeLater": "稍后可在 Esc 菜单的“按键绑定”中更改。",
       "confirm": "确认"
     },

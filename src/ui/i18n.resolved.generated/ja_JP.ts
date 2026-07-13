@@ -363,10 +363,9 @@ export const ja_JP: EnTranslations = {
     "cameraPrompt": {
       "title": "カメラを選択",
       "intro": "カメラがキャラクターを追う方法を選びましょう。",
-      "mouseDesc": "マウスを動かして視点を回します。多くの初心者が好む現代的な操作です。",
-      "recommended": "おすすめ",
+      "mouseDesc": "ボタンを押さずにマウスを動かして視点を回します。",
       "classicTitle": "クラシックカメラ",
-      "classicDesc": "右クリックを押しながら視点を回します。従来の操作方式です。",
+      "classicDesc": "右クリックを押しながらマウスを動かして視点を回します。",
       "changeLater": "この設定は後で Esc の「キー割り当て」から変更できます。",
       "confirm": "決定"
     },

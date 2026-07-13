@@ -26,8 +26,8 @@ describe('chat channel tabs — pure model', () => {
   });
 
   it('maps each channel to the slash prefix the sim/server parses', () => {
-    // say is the engine default for unprefixed text
-    expect(channelSendPrefix('say')).toBe('');
+    // say is explicit so the online server clears any remembered whisper/guild mode
+    expect(channelSendPrefix('say')).toBe('/say ');
     expect(channelSendPrefix('yell')).toBe('/y ');
     expect(channelSendPrefix('party')).toBe('/p ');
     expect(channelSendPrefix('world')).toBe('/world ');
@@ -52,8 +52,8 @@ describe('chat channel tabs — pure model', () => {
       expect(composeChatLine('party', 'pull on 3')).toBe('/p pull on 3');
     });
 
-    it('sends plain text unprefixed for the say channel', () => {
-      expect(composeChatLine('say', 'hello there')).toBe('hello there');
+    it('sends plain text with an explicit /say prefix for the say channel', () => {
+      expect(composeChatLine('say', 'hello there')).toBe('/say hello there');
     });
 
     it('lets an explicit slash command win over the active channel', () => {
@@ -227,7 +227,7 @@ describe('chat channel tabs — pure model', () => {
     it('defaults to say (no tint, plain text) before anything is sent', () => {
       const sticky = 'say';
       const ch = effectiveOnAllTab(sticky);
-      expect(composeChatLine(ch as 'say', 'hi')).toBe('hi');
+      expect(composeChatLine(ch as 'say', 'hi')).toBe('/say hi');
       expect(chatInputTint(ch as 'say')).toBeNull();
       expect(sticky).toBe('say');
     });

@@ -242,6 +242,20 @@ describe('MovableFrame', () => {
     expect(JSON.parse(store.get(KEY) ?? '{}')).toEqual({ left: 440, top: 300 });
   });
 
+  it('reapplies a persisted visual position immediately when UI Scale changes live', () => {
+    store.set(KEY, JSON.stringify({ left: 300, top: 200 }));
+    const { frame, mover } = makeFrame();
+    expect(frame.style.left).toBe('300px');
+    expect(frame.style.top).toBe('200px');
+
+    uiScaleStub = 1.25;
+    mover.reapplyPosition();
+
+    expect(frame.style.left).toBe('240px');
+    expect(frame.style.top).toBe('160px');
+    expect(JSON.parse(store.get(KEY) ?? '{}')).toEqual({ left: 300, top: 200 });
+  });
+
   it('a drag is clamped inside the viewport margin', () => {
     const { frame, btn } = makeFrame();
     btn.dispatch('click', pointer());

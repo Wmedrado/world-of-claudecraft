@@ -1,4 +1,5 @@
 import { DUNGEON_FLOOR_Y, DUNGEON_X_THRESHOLD, getActiveWorldContent, WORLD_MAX_X } from './data';
+import { dockLocalPoint, dockSectionAtLocal, dockSurfaceLine, dockSurfaceYAt } from './dock_layout';
 import { fbm2, hash2 } from './rng';
 import type { BiomeId, HeightStamp, WorldContent } from './types';
 import { isInSowfieldShell, SOWFIELD_FLAT, sowfieldStandLift } from './vale_cup_layout';
@@ -439,16 +440,28 @@ function baseHeight(x: number, z: number, seed: number): number {
   return h;
 }
 
+// The renderer seats each dock section relative to its shore anchor, then uses
+// the plank top as a raised walkable surface. Return the matching absolute
+// surface height, or -Infinity outside every deck footprint.
+function dockSurfaceHeight(x: number, z: number, seed: number): number {
+  let surface = -Infinity;
+  for (const dock of world().content.props.docks) {
+    const local = dockLocalPoint(dock, x, z);
+    if (dockSectionAtLocal(local.x, local.z) < 0) continue;
+    const line = dockSurfaceLine(dock, (sampleX, sampleZ) => terrainHeight(sampleX, sampleZ, seed));
+    surface = Math.max(surface, dockSurfaceYAt(line, local.z));
+  }
+  return surface;
+}
+
 // Ground height including instanced dungeon floors (flat, far off-world).
 export function groundHeight(x: number, z: number, seed: number): number {
   if (x > DUNGEON_X_THRESHOLD) return DUNGEON_FLOOR_Y;
-  // The Vale Cup grandstands are walkable: the ground steps up in seated tiers so
-  // players can climb the bleachers (the boss-dais pattern, raised WALKABLE ground
-  // is the heightfield). This lives in groundHeight, NOT terrainHeight, so the
-  // render's flat terrain baseline (and the wooden deck/post geometry it seats on
-  // that baseline) is unchanged; the ramp just raises where the player stands, up
-  // onto the decks. Zero outside the stand footprints, so the pitch stays flat.
-  return terrainHeight(x, z, seed) + sowfieldStandLift(x, z);
+  // Raised walkable props live in groundHeight, NOT terrainHeight, so the
+  // renderer's terrain baseline stays unchanged. Vale Cup adds tier lifts while
+  // docks contribute absolute plank surfaces seated against that baseline.
+  const terrain = terrainHeight(x, z, seed) + sowfieldStandLift(x, z);
+  return Math.max(terrain, dockSurfaceHeight(x, z, seed));
 }
 
 export function terrainHeight(x: number, z: number, seed: number): number {

@@ -1,22 +1,24 @@
 // First-run camera-mode prompt (issue #1727): a one-shot modal shown once, on the
 // first world entry in a given browser, that lets the player pick Classic or Mouse
-// Camera. Mouse Camera is pre-selected and marked recommended; confirming applies
-// and persists the existing `mouseCamera` setting exactly as the Esc, Key Bindings
-// toggle does. Skipped on touch-controls devices (joystick controls apply there).
+// Camera. Classic appears first and is pre-selected, while both options use neutral
+// descriptions with no recommendation badge. Confirming applies and persists the
+// existing `mouseCamera` setting exactly as the Esc, Key Bindings toggle does.
+// Skipped on touch-controls devices (joystick controls apply there).
 //
 // Self-contained top-level modal (like native_update_prompt.ts), spawned by main.ts
 // rather than composed into Hud: it owns its own backdrop, accessibility wiring, and
 // the localStorage "already shown" flag. The pure show/apply policy lives in
-// camera_prompt_decision.ts so it is unit-tested without the DOM.
+// camera_prompt_core.ts so it is unit-tested without the DOM.
 
 import { isNativeAppShell, useTouchInterface } from '../game/mobile_controls';
 import {
   type CameraModeChoice,
   cameraChoiceEnablesMouseCamera,
-  RECOMMENDED_CAMERA_CHOICE,
+  DEFAULT_CAMERA_CHOICE,
   shouldShowCameraPrompt,
-} from './camera_prompt_decision';
+} from './camera_prompt_core';
 import { markDialogRoot } from './dialog_root';
+import { FocusManager, type FocusTrapHandle } from './focus_manager';
 import { t } from './i18n';
 
 // Per-browser flag: set once the prompt has been answered or dismissed so it never
@@ -28,6 +30,21 @@ const BLOCKED_POLL_MS = 250;
 const BLOCKED_WAIT_CAP_MS = 15_000;
 
 let promptOpen = false;
+let promptClose: (() => void) | null = null;
+let promptFocusHandle: FocusTrapHandle | null = null;
+const promptFocusManager = new FocusManager();
+
+/** Shared gameplay/gamepad gate queried by main.ts while this modal is live. */
+export function cameraPromptOpen(): boolean {
+  return promptOpen;
+}
+
+/** Close an open prompt from an external modal dispatcher such as gamepad Escape. */
+export function dismissCameraPrompt(): boolean {
+  if (!promptClose) return false;
+  promptClose();
+  return true;
+}
 
 function storageGet(key: string): string | null {
   try {
@@ -103,7 +120,6 @@ function buildOption(
   titleText: string,
   descText: string,
   checked: boolean,
-  recommendedText: string | null,
 ): OptionRefs {
   const label = document.createElement('label');
   label.className = 'camera-prompt-option';
@@ -121,12 +137,6 @@ function buildOption(
   const titleEl = document.createElement('span');
   titleEl.className = 'camera-prompt-option-title';
   titleEl.textContent = titleText;
-  if (recommendedText) {
-    const badge = document.createElement('span');
-    badge.className = 'camera-prompt-badge';
-    badge.textContent = recommendedText;
-    titleEl.append(badge);
-  }
 
   const descEl = document.createElement('span');
   descEl.className = 'camera-prompt-option-desc';
@@ -135,30 +145,6 @@ function buildOption(
   body.append(titleEl, descEl);
   label.append(input, body);
   return { label, input };
-}
-
-// Tab stops inside the dialog: the checked radio (the group is one stop) plus the
-// confirm button. Recomputed each Tab so the trap follows the live radio selection.
-function focusables(dialog: HTMLElement): HTMLElement[] {
-  const radios = Array.from(dialog.querySelectorAll<HTMLInputElement>('input[type="radio"]'));
-  const checked = radios.find((r) => r.checked) ?? radios[0];
-  const buttons = Array.from(dialog.querySelectorAll<HTMLElement>('button'));
-  return [checked, ...buttons].filter((el): el is HTMLElement => !!el);
-}
-
-function trapTab(e: KeyboardEvent, dialog: HTMLElement): void {
-  const items = focusables(dialog);
-  if (items.length === 0) return;
-  const first = items[0];
-  const last = items[items.length - 1];
-  const active = document.activeElement as HTMLElement | null;
-  if (e.shiftKey && active === first) {
-    e.preventDefault();
-    last.focus();
-  } else if (!e.shiftKey && active === last) {
-    e.preventDefault();
-    first.focus();
-  }
 }
 
 function showCameraPrompt(deps: CameraPromptDeps): void {
@@ -189,22 +175,19 @@ function showCameraPrompt(deps: CameraPromptDeps): void {
   group.setAttribute('role', 'radiogroup');
   group.setAttribute('aria-labelledby', 'camera-prompt-title');
 
-  const recommended = RECOMMENDED_CAMERA_CHOICE === 'mouse';
-  const mouseOpt = buildOption(
-    'mouse',
-    t('hud.options.mouseCamera'),
-    t('hudChrome.cameraPrompt.mouseDesc'),
-    recommended,
-    t('hudChrome.cameraPrompt.recommended'),
-  );
   const classicOpt = buildOption(
     'classic',
     t('hudChrome.cameraPrompt.classicTitle'),
     t('hudChrome.cameraPrompt.classicDesc'),
-    !recommended,
-    null,
+    DEFAULT_CAMERA_CHOICE === 'classic',
   );
-  group.append(mouseOpt.label, classicOpt.label);
+  const mouseOpt = buildOption(
+    'mouse',
+    t('hud.options.mouseCamera'),
+    t('hudChrome.cameraPrompt.mouseDesc'),
+    DEFAULT_CAMERA_CHOICE === 'mouse',
+  );
+  group.append(classicOpt.label, mouseOpt.label);
 
   const note = document.createElement('div');
   note.className = 'camera-prompt-note';
@@ -221,15 +204,21 @@ function showCameraPrompt(deps: CameraPromptDeps): void {
   dialog.append(title, desc, group, note, actions);
   backdrop.append(dialog);
   document.body.append(backdrop);
+  promptFocusHandle = promptFocusManager.open({ root: () => dialog });
 
   const close = (): void => {
     if (!promptOpen) return;
     promptOpen = false;
+    promptClose = null;
+    const focusHandle = promptFocusHandle;
+    promptFocusHandle = null;
     // Record the flag on any resolution (confirm or Esc dismiss) so the prompt is
     // shown at most once per browser.
     storageSet(SHOWN_KEY, '1');
     backdrop.remove();
+    focusHandle?.release();
   };
+  promptClose = close;
 
   const selectedChoice = (): CameraModeChoice => (mouseOpt.input.checked ? 'mouse' : 'classic');
 
@@ -238,9 +227,9 @@ function showCameraPrompt(deps: CameraPromptDeps): void {
     close();
   });
 
-  // Esc dismisses without changing the setting (the flag still records); Tab is
-  // trapped inside the dialog. The listener sits on the backdrop and stops every
-  // key from bubbling to the live game behind the modal, so gameplay keybinds
+  // Esc dismisses without changing the setting (the flag still records). Tab is
+  // trapped by the shared FocusManager. This listener stops every other key from
+  // bubbling to the live game behind the modal, so gameplay keybinds
   // (movement, Tab target-nearest, abilities) do not fire while the prompt is up.
   // The radios / button have already handled their native keys by this bubble
   // phase, so stopPropagation does not break arrow selection or Enter-to-confirm.
@@ -248,12 +237,10 @@ function showCameraPrompt(deps: CameraPromptDeps): void {
     if (e.key === 'Escape') {
       e.preventDefault();
       close();
-    } else if (e.key === 'Tab') {
-      trapTab(e, dialog);
     }
     e.stopPropagation();
   });
 
-  // Focus the recommended (checked) radio so keyboard users start on it.
-  window.setTimeout(() => mouseOpt.input.focus(), 0);
+  // The default Classic radio is the first meaningful control in DOM order.
+  promptFocusHandle.focusFirst();
 }

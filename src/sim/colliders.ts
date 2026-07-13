@@ -80,19 +80,6 @@ function rotY(lx: number, lz: number, rot: number): { x: number; z: number } {
   return { x: lx * c + lz * s, z: -lx * s + lz * c };
 }
 
-// Fishing-dock deck footprint. buildProps (src/render/props.ts) seats three
-// `dockPlatform` sections stepping out from the shore anchor along local -z;
-// their scaled union is ~1.95 wide and ~6.40 deep. The same numbers route dock
-// footsteps in src/render/world_audio.ts (DOCK_*); mirror them here so the deck
-// the player sees is the deck they collide with, like the stone hut beside it.
-const DOCK_DECK_HALF_WIDTH = 0.98;
-const DOCK_DECK_MIN_Z = -6.38;
-const DOCK_DECK_MAX_Z = 0.02;
-// The deck hugs the shore ~0.4 above the ground the player stands on; a low
-// camera top keeps the chase cam from pulling in for it (a jump never lands the
-// player on top: prop colliders are movement-only, terrain drives height).
-const DOCK_DECK_TOP = 0.6;
-
 // ---------------------------------------------------------------------------
 // Collider sets
 // ---------------------------------------------------------------------------
@@ -145,7 +132,7 @@ function staticWorldColliders(seed: number): Collider[] {
     out.push({ type: 'circle', x, z, r: 5, cameraTopY: topY(seed, x, z, 5.2), camGhost: true });
   }
 
-  // dock huts + the wooden deck the hut sits beside
+  // Dock decks are raised walkable ground in world.ts; only the hut blocks.
   for (const d of PROPS.docks) {
     const hut = rotY(d.hutLocal.x, d.hutLocal.z, d.rot);
     const x = d.x + hut.x,
@@ -159,23 +146,6 @@ function staticWorldColliders(seed: number): Collider[] {
       rot: d.rot,
       cameraTopY: topY(seed, x, z, 2.9),
       camGhost: true,
-    });
-    // Deck: one OBB over the union of the rendered platform sections, in the
-    // dock's local frame rotated into world (same transform as the hut). NOT
-    // camGhost: the renderer never hides the deck, so the chase cam must see it,
-    // and its low cameraTopY keeps that from causing spurious pull-in.
-    const deckLz = (DOCK_DECK_MIN_Z + DOCK_DECK_MAX_Z) / 2;
-    const deck = rotY(0, deckLz, d.rot);
-    const dx = d.x + deck.x,
-      dz = d.z + deck.z;
-    out.push({
-      type: 'obb',
-      x: dx,
-      z: dz,
-      hw: DOCK_DECK_HALF_WIDTH,
-      hd: (DOCK_DECK_MAX_Z - DOCK_DECK_MIN_Z) / 2,
-      rot: d.rot,
-      cameraTopY: topY(seed, dx, dz, DOCK_DECK_TOP),
     });
   }
 

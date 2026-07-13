@@ -2748,6 +2748,13 @@ export class Hud {
     this.playerFrameMover?.reset();
   }
 
+  /** Repaint persisted visual-space geometry after a live UI Scale change. */
+  reapplySavedGeometry(): void {
+    this.applyChatBoxGeometry();
+    this.targetFrameMover?.reapplyPosition();
+    this.playerFrameMover?.reapplyPosition();
+  }
+
   // The player frame docks inside #actionbar-stack, whose #bottom-bar ancestor
   // carries a centering transform, and a transformed ancestor hijacks any
   // fixed/absolute positioning (it becomes the containing block). Detaching

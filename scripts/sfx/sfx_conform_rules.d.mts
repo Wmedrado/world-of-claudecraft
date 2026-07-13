@@ -21,6 +21,7 @@ export interface FileStats {
   peakDb?: number | null;
   lufs?: number | null;
   isLossless?: boolean;
+  isMp3?: boolean;
 }
 
 export interface Classification {

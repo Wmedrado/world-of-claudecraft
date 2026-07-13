@@ -52,15 +52,16 @@ through it before writing, so a regenerated clip already meets the standard.
   above 1 s normalize to -14 LUFS integrated. Normalization is a consistency
   measure, not a clipping fix: the engine caps per-play gain at 1.0 under a 0.85
   master, so clipping is not otherwise possible.
-- **Channels (mono/stereo policy per playback path):** mono, except ambience
-  loops. `playAt` positions a clip through an equalpower `PannerNode` that
+- **Channels (mono/stereo policy per playback path):** mono, except global
+  ambience beds. `playAt` positions a clip through an equalpower `PannerNode` that
   downmixes to mono before panning, and `playUi` sums to the mono master, so for
   a positional or personal cue a second channel is decoded into the shared
   `AudioBuffer` and then discarded; on the iOS Capacitor build (WKWebView) that
-  decoded buffer memory is the binding constraint. Only ambience loops (`amb_*`),
-  flagged `stereo: true` in `scripts/sfx/sfx_prompts.mjs`, keep both channels,
-  because their L/R width is audible and they never pass through a panner. Sustained
-  spell casts (`cast_*`) are positional and therefore mono. The policy is
+  decoded buffer memory is the binding constraint. Global ambience beds flagged
+  `stereo: true` in `scripts/sfx/sfx_prompts.mjs` keep both channels because their
+  L/R width is audible and they never pass through a panner. Water is one such
+  global bed. Campfire and forge loops are positioned point sources, so they are
+  mono. Sustained spell casts (`cast_*`) are positional and therefore mono. The policy is
   data-driven from that per-entry flag, never a hardcoded key list.
 - **Naming:** snake_case `category_subject_variant`, and the filename equals the
   manifest key at `public/audio/sfx/<key>.mp3`. Ordered takes use `<key>_<n>.mp3`
@@ -263,7 +264,7 @@ pitched-up `attack`. Families: `beast`, `boar`, `spider`, `mudfin`, `burrower`,
 | `amb_wind_marsh` | ✓ | global | eerie damp marshland wind, low mournful breeze with distant frogs and insects |
 | `amb_wind_peaks` | ✓ | global | cold howling mountain wind across high rocky peaks, bleak and gusty |
 | `amb_birds` | ✓ | global | calm daytime forest ambience with gentle birdsong |
-| `amb_water` | ✓ | point | gentle lake water lapping at the shore, soft flowing ripples |
+| `amb_water` | ✓ | global | gentle lake water lapping at the shore, soft flowing ripples |
 | `amb_campfire` | ✓ | point | a crackling campfire, popping embers and flames |
 | `amb_forge` | ✓ | point | a blacksmith forge, roaring furnace with rhythmic hammer strikes on an anvil |
 | `amb_dungeon` | ✓ | global | a dark stone dungeon interior, dripping water echoes and a low ominous drone |

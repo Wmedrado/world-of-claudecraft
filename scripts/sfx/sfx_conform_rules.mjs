@@ -16,8 +16,8 @@ export const TARGET_MONO_CHANNELS = 1;
 export const TARGET_STEREO_CHANNELS = 2;
 
 // Channel policy. Stereo is retained ONLY for catalog entries explicitly flagged
-// `stereo: true` (ambience loops, where L/R width is audible and the loop is not
-// positioned through a panner). Every other cue is mono: `playAt` routes through
+// `stereo: true` (global ambience beds, where L/R width is audible and the loop is
+// not positioned through a panner). Every other cue is mono: `playAt` routes through
 // an equalpower PannerNode that downmixes to mono before positioning, and
 // `playUi` sums to the mono master, so a second channel is decoded into the
 // shared AudioBuffer and then discarded. Encoding those cues mono halves their
@@ -47,7 +47,7 @@ export function channelProblem(channels, expected) {
  *   - 'lossless source' is always present in problems so the file is always processed.
  *   - Sample rate and loudness checks still apply.
  *
- * @param {{ duration: number, bitrate: number, sampleRate: number, peakDb?: number|null, lufs?: number|null, isLossless?: boolean }} stats
+ * @param {{ duration: number, bitrate: number, sampleRate: number, peakDb?: number|null, lufs?: number|null, isLossless?: boolean, isMp3?: boolean }} stats
  * @returns {{ reject: boolean, problems: string[], normBranch: 'peak'|'lufs'|null }}
  */
 export function classify({
@@ -57,6 +57,7 @@ export function classify({
   peakDb = null,
   lufs = null,
   isLossless = false,
+  isMp3 = true,
 }) {
   if (!isLossless && bitrate < MIN_SOURCE_BITRATE) {
     return { reject: true, problems: [], normBranch: null };
@@ -67,6 +68,7 @@ export function classify({
   if (isLossless) {
     problems.push('lossless source');
   } else {
+    if (!isMp3) problems.push('non-MP3 source');
     if (bitrate < TARGET_BITRATE) {
       problems.push(`${bitrate}kbps (want ${TARGET_BITRATE}kbps)`);
     } else if (bitrate > TARGET_BITRATE + 8) {
