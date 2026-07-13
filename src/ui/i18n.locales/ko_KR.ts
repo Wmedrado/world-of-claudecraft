@@ -5586,11 +5586,14 @@ export const ko_KR: Partial<Record<TranslationKey, string>> = {
   'hudChrome.nativeUpdate.update': '업데이트',
   'hudChrome.cameraPrompt.title': '카메라 선택',
   'hudChrome.cameraPrompt.intro': '카메라가 캐릭터를 따라가는 방식을 선택하세요.',
-  'hudChrome.cameraPrompt.mouseDesc': '마우스를 움직여 시점을 돌립니다. 대부분의 초보자가 선호하는 현대적 조작입니다.',
+  'hudChrome.cameraPrompt.mouseDesc':
+    '마우스를 움직여 시점을 돌립니다. 대부분의 초보자가 선호하는 현대적 조작입니다.',
   'hudChrome.cameraPrompt.recommended': '권장',
   'hudChrome.cameraPrompt.classicTitle': '클래식 카메라',
-  'hudChrome.cameraPrompt.classicDesc': '우클릭을 누른 채 시점을 돌립니다. 전통적인 조작 방식입니다.',
-  'hudChrome.cameraPrompt.changeLater': '이 설정은 나중에 Esc 메뉴의 키 설정에서 변경할 수 있습니다.',
+  'hudChrome.cameraPrompt.classicDesc':
+    '우클릭을 누른 채 시점을 돌립니다. 전통적인 조작 방식입니다.',
+  'hudChrome.cameraPrompt.changeLater':
+    '이 설정은 나중에 Esc 메뉴의 키 설정에서 변경할 수 있습니다.',
   'hudChrome.cameraPrompt.confirm': '확인',
   'desktop.update.downloading': '업데이트 {version} 다운로드 중...',
   'desktop.update.ready':

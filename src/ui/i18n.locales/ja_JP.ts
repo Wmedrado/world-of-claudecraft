@@ -5590,10 +5590,12 @@ export const ja_JP: Partial<Record<TranslationKey, string>> = {
   'hudChrome.nativeUpdate.update': '更新',
   'hudChrome.cameraPrompt.title': 'カメラを選択',
   'hudChrome.cameraPrompt.intro': 'カメラがキャラクターを追う方法を選びましょう。',
-  'hudChrome.cameraPrompt.mouseDesc': 'マウスを動かして視点を回します。多くの初心者が好む現代的な操作です。',
+  'hudChrome.cameraPrompt.mouseDesc':
+    'マウスを動かして視点を回します。多くの初心者が好む現代的な操作です。',
   'hudChrome.cameraPrompt.recommended': 'おすすめ',
   'hudChrome.cameraPrompt.classicTitle': 'クラシックカメラ',
-  'hudChrome.cameraPrompt.classicDesc': '右クリックを押しながら視点を回します。従来の操作方式です。',
+  'hudChrome.cameraPrompt.classicDesc':
+    '右クリックを押しながら視点を回します。従来の操作方式です。',
   'hudChrome.cameraPrompt.changeLater': 'この設定は後で Esc の「キー割り当て」から変更できます。',
   'hudChrome.cameraPrompt.confirm': '決定',
   'desktop.update.downloading': 'アップデート {version} をダウンロード中...',
