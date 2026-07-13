@@ -352,6 +352,20 @@ export const hudChromeStrings = {
     notNow: 'Not now',
     update: 'Update',
   },
+  // First-run camera-mode prompt (issue #1727): a one-shot modal on the first world
+  // entry in a browser, offering Classic vs Mouse Camera. The mouse option title
+  // reuses hud.options.mouseCamera; these are the surrounding strings. The setting
+  // stays changeable later under Esc, Key Bindings.
+  cameraPrompt: {
+    title: 'Choose Your Camera',
+    intro: 'Pick how the camera follows your character.',
+    mouseDesc: 'Move the mouse to turn the camera. Modern controls most new players prefer.',
+    recommended: 'Recommended',
+    classicTitle: 'Classic Camera',
+    classicDesc: 'Hold right-click to turn the camera. The traditional control scheme.',
+    changeLater: 'You can change this later under Esc, Key Bindings.',
+    confirm: 'Confirm',
+  },
   // Cast-bar progressbar accessible names (the visible spell name + seconds-left
   // text are the live status; these name which bar is which). One for the player's
   // own cast (#castbar) and one for the target/boss cast (#tf-castbar).
