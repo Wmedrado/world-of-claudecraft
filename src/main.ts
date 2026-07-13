@@ -106,6 +106,13 @@ import {
   NATIVE_APP,
   type ReleaseEntry,
 } from './net/online';
+import {
+  clearPlayMarker,
+  freshMarkerCharacterId,
+  readPlayMarker,
+  refreshPlayMarker,
+  savePlayMarker,
+} from './net/resume_play';
 import { openStripeCheckout } from './net/stripe_checkout';
 // The wallet module is loaded lazily via dynamic import() in the wallet
 // controller below, so it stays out of the main entry chunk and only loads when
@@ -274,6 +281,10 @@ let pendingDeleteCharacter: CharacterSummary | null = null;
 // instead of a per-row one; it acts on whichever character is selected. Mobile
 // and narrow layouts keep the per-row buttons and never read this.
 let charselectSelected: CharacterSummary | null = null;
+// One-shot: set by the boot resume path to the character id to auto-enter, then
+// consumed by refreshCharacters once its list has loaded (mobile WebView-reload
+// resume; see src/net/resume_play.ts).
+let pendingResumeCharacterId: number | null = null;
 let homepageMusic: HTMLAudioElement | null = null;
 let homepageMusicStarted = false;
 let homepageMusicMuted = readHomepageMusicMuted();
@@ -1713,6 +1724,8 @@ async function startGame(
       // Signal the server to leave immediately, skipping the linkdead grace, so
       // the character is not held in-world after a deliberate logout.
       online?.sendLogout();
+      // A deliberate logout is not a resumable drop: forget the active session.
+      clearPlayMarker();
       location.reload();
     },
     captureKey: (cb) => input.captureNextKey(cb),
@@ -3596,6 +3609,7 @@ function enterLoggedOutChrome(): void {
 function logoutAccount(): void {
   const finish = () => {
     api.clearSession();
+    clearPlayMarker();
     location.reload();
   };
   if (!api.token) {
@@ -3680,6 +3694,7 @@ const loggedOutModel = () =>
 
 function handleAccountSessionExpired(): void {
   api.clearSession();
+  clearPlayMarker();
   enterLoggedOutChrome();
   paintAccountPortal(loggedOutModel());
 }
@@ -3996,6 +4011,11 @@ function setupSecuritySection(): void {
 }
 
 function showRealmList(dir?: import('./net/online').RealmDirectory): void {
+  // Reaching the realm list means the boot resume could not auto-select a realm
+  // (no remembered realm). Drop any pending resume intent here so a later manual
+  // realm pick does not surprise-enter the world on a decision made at boot; the
+  // player continues through normal realm + character select.
+  pendingResumeCharacterId = null;
   show('#realm-panel');
   const listEl = $('#realm-list');
   const render = (d: import('./net/online').RealmDirectory) => {
@@ -4289,6 +4309,22 @@ async function refreshCharacters(): Promise<void> {
       show('#charcreate-panel');
       return;
     }
+    // Boot resume: a WebView reload during play sent us here with a persisted
+    // active-play marker. If that character still exists, re-enter the world
+    // directly instead of showing char-select (a linkdead session resumes
+    // seamlessly; a genuinely live duplicate falls back to the fatal overlay,
+    // same as a manual enter). One-shot: consume the pending id either way, and
+    // clear the persisted marker if the character is gone so we stop retrying.
+    if (pendingResumeCharacterId !== null) {
+      const resumeId = pendingResumeCharacterId;
+      pendingResumeCharacterId = null;
+      const target = chars.find((c) => c.id === resumeId);
+      if (target) {
+        void enterWorld(target);
+        return;
+      }
+      clearPlayMarker();
+    }
     for (const c of chars) {
       const row = document.createElement('li');
       row.className = `char-row${c.online ? ' online' : ''}${c.forceRename ? ' rename-required' : ''}`;
@@ -4518,12 +4554,18 @@ async function enterWorld(c: CharacterSummary, button?: HTMLButtonElement): Prom
   const poll = setInterval(() => {
     if (world.connected && world.entities.has(world.playerId)) {
       clearInterval(poll);
+      // Remember the active session so a WebView reload during play resumes
+      // straight back into the world instead of the home/login screen.
+      savePlayMarker(c.id, Date.now());
       void startGame(world, null, world, `char:${c.id}`, true);
     } else if (Date.now() - waitStart > 10000) {
       clearInterval(poll);
       world.close();
       clearCardProviders();
       hideReconnectOverlay();
+      // Entry never completed: drop any resume marker so the next boot does not
+      // loop straight back into a session that will not start.
+      clearPlayMarker();
       fatalOverlay(t('loading.enterTimeout'));
     }
   }, 50);
@@ -4533,6 +4575,9 @@ async function enterWorld(c: CharacterSummary, button?: HTMLButtonElement): Prom
     clearInterval(poll);
     clearCardProviders();
     hideReconnectOverlay();
+    // The session ended for good (retries exhausted, kick, takeover, auth fail):
+    // clear the resume marker so a reload does not loop back into a dead session.
+    clearPlayMarker();
     fatalOverlay(userFacingApiError(reason));
   };
   // an unexpected drop is not fatal: the server holds the character in-world
@@ -8157,7 +8202,18 @@ function wireStartScreens(): void {
     showDiscordChoice(parkedDiscordChoice);
   } else if (api.restoreSession()) {
     enterLoggedInChrome();
-    void revalidateAccountSession();
+    void revalidateAccountSession().then(() => {
+      // WebView-reload resume: if the session survived revalidation and a fresh
+      // active-play marker is present, re-enter the world directly instead of
+      // leaving the player parked on the home/character-select chrome. The
+      // Discord-onboarding arm below already enters play, so skip it there.
+      if (discordOnboarding) return;
+      if (!api.token) return; // revalidation cleared a stale session
+      const resumeId = freshMarkerCharacterId(readPlayMarker(), Date.now());
+      if (resumeId === null) return;
+      pendingResumeCharacterId = resumeId;
+      goToLoggedInPlay();
+    });
     // Re-bind the account's linked wallet on a restored session (not just on fresh
     // login), so an auto-reconnected wallet shows verified and is NOT treated as
     // unverified and disconnected (the bug that forced a re-sign on every reload).
@@ -8173,6 +8229,16 @@ function wireStartScreens(): void {
     enterLoggedOutChrome();
     if (isDesktopLoginPage()) show('#login-panel');
   }
+
+  // Keep the active-play resume marker fresh right up to the moment the app is
+  // backgrounded (the pre-eviction instant on iOS), so even a long play session
+  // resumes into the world on the reload that follows an OS WebView eviction. A
+  // no-op when no session is in play, so it is safe to register unconditionally.
+  const restampResumeMarker = () => {
+    if (document.visibilityState === 'hidden') refreshPlayMarker(Date.now());
+  };
+  document.addEventListener('visibilitychange', restampResumeMarker);
+  window.addEventListener('pagehide', () => refreshPlayMarker(Date.now()));
 
   // Header Logo click listener to return to homepage
   const headerLogoBtn = $('#header-logo-btn');
