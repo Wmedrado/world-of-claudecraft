@@ -519,6 +519,7 @@ export interface ClientSession {
   alive: boolean;
   joinedAt: number;
   dbSessionId: number | null; // play_sessions row, set once the insert lands
+  metricsMaxLevel: number;
   left: boolean; // set in leave(); guards against the open-session insert landing after disconnect
   // linkdead grace: true while the socket has dropped but the character is
   // held in-world awaiting a reconnect. graceUntil is the epoch-ms deadline
@@ -2234,6 +2235,7 @@ export class GameServer {
     );
     this.applyAccountQuestLockouts(pid, accountCosmetics);
     const sessionIp = meta.ip ?? '';
+    const initialLevel = this.sim.entities.get(pid)?.level ?? state?.level ?? 1;
     const botTrackingContext = this.botDetector.createTrackingContext(
       { accountId, characterId, name, ip: sessionIp },
       meta,
@@ -2253,6 +2255,7 @@ export class GameServer {
       alive: true,
       joinedAt: Date.now(),
       dbSessionId: null,
+      metricsMaxLevel: initialLevel,
       left: false,
       linkdead: false,
       graceUntil: 0,
@@ -2340,13 +2343,13 @@ export class GameServer {
     void deedRecordsIdle()
       .then(() => reconcileOnLogin(accountId))
       .catch(() => {});
-    openPlaySession(accountId, characterId, name, meta)
+    openPlaySession(accountId, characterId, name, meta, initialLevel)
       .then((id) => {
         session.dbSessionId = id;
         // If the player disconnected before this insert landed, leave() saw a
         // null id and skipped the close. Close it now so the row isn't orphaned.
         if (session.left) {
-          void closePlaySession(id).catch((err) =>
+          void closePlaySession(id, session.metricsMaxLevel).catch((err) =>
             console.error('failed to close play session:', err),
           );
         }
@@ -2561,7 +2564,7 @@ export class GameServer {
       .announcePresence({ characterId: session.characterId, name: session.name }, false)
       .catch((err) => console.error('presence announce failed:', err));
     if (session.dbSessionId !== null) {
-      void closePlaySession(session.dbSessionId).catch((err) =>
+      void closePlaySession(session.dbSessionId, session.metricsMaxLevel).catch((err) =>
         console.error('failed to close play session:', err),
       );
     }
@@ -2783,7 +2786,7 @@ export class GameServer {
   async endAllPlaySessions(): Promise<void> {
     for (const session of this.clients.values()) {
       if (session.dbSessionId === null) continue;
-      await closePlaySession(session.dbSessionId).catch((err) =>
+      await closePlaySession(session.dbSessionId, session.metricsMaxLevel).catch((err) =>
         console.error('failed to close play session:', err),
       );
     }
@@ -4826,6 +4829,10 @@ export class GameServer {
           // must not spam their guild).
           if (ev.retro !== true) this.maybeBroadcastDeedUnlock(s, ev.deedId);
         }
+      }
+      if (ev.type === 'levelup' && ev.pid !== undefined) {
+        const session = this.clients.get(ev.pid);
+        if (session) session.metricsMaxLevel = Math.max(session.metricsMaxLevel, ev.level);
       }
       if (ev.type === 'levelup' && ev.level === 5 && ev.pid !== undefined) {
         const s = this.clients.get(ev.pid);
