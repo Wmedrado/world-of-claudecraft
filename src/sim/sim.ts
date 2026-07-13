@@ -3507,6 +3507,8 @@ export class Sim {
     // time since its previous mark to the named phase. Undefined offline/headless, so
     // this is a no-op there; it draws no rng and mutates nothing either way, keeping
     // the tick deterministic. The server injects it for its on-demand tick profiler.
+    // The mob loop additionally passes the mob it just updated as a sub-phase tag so
+    // the host can split mob.update per zone (issue #1833); every other call omits it.
     const lap = this.cfg.perfLap;
     this.updatePendingMobRespawns();
     lap?.('respawns');
@@ -3565,7 +3567,10 @@ export class Sim {
     for (const e of this.entities.values()) {
       if (e.kind === 'mob') {
         this.updateMob(e);
-        lap?.('mob.update');
+        // Tag the mob.update lap with the mob so the host can attribute this slice
+        // of the phase cost to its zone/group (issue #1833). The sim reads nothing
+        // from it and allocates nothing, so this stays behavior- and parity-inert.
+        lap?.('mob.update', e);
         updateAuras(this.ctx, e);
         lap?.('mob.auras');
       } else if (e.kind === 'npc') {

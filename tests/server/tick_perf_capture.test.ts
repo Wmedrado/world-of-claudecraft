@@ -14,8 +14,10 @@ vi.mock('../../server/db', () => ({
   grantAccountMechChroma: vi.fn(async () => ({ completedQuestIds: [], mechChromaIds: [] })),
 }));
 
-import { GameServer, SIM_LAP_PHASES } from '../../server/game';
+import { GameServer, mobZonePhase, SIM_LAP_PHASES, SIM_MOB_ZONE_PHASES } from '../../server/game';
+import { ZONES } from '../../src/sim/data';
 import { Sim } from '../../src/sim/sim';
+import type { Entity } from '../../src/sim/types';
 
 // Drive the capture window the way the world loop does: advance sim ticks, feed the
 // profiler a synthetic per-tick sample, then run the finalize check, until the window
@@ -154,5 +156,37 @@ describe('tick perf capture lifecycle', () => {
     for (const phase of emitted) {
       expect(registered.has(`sim.${phase}`), `sim.${phase} is not in SIM_LAP_PHASES`).toBe(true);
     }
+  });
+
+  it('registers every mob.update per-zone bucket so its timing is never silently dropped', () => {
+    // TickProfiler.add() ignores an unregistered phase. The per-zone mob.update buckets
+    // (issue #1833) are host-derived, so unlike SIM_LAP_PHASES the sim never emits them;
+    // pin that the GameServer profiler registered ALL of them, or a mob.update split
+    // would vanish from the report.
+    const server = new GameServer();
+    const phases = (
+      server as unknown as { tickProfiler: { profile: () => { phases: Record<string, unknown> } } }
+    ).tickProfiler.profile().phases;
+    expect(SIM_MOB_ZONE_PHASES.length).toBe(ZONES.length + 2); // every zone + instance + other
+    for (const phase of SIM_MOB_ZONE_PHASES) {
+      expect(phase in phases, `${phase} is not registered in the tick profiler`).toBe(true);
+    }
+  });
+
+  it('maps a mob to its zone/group bucket (mobZonePhase)', () => {
+    const at = (x: number, z: number): string => mobZonePhase({ pos: { x, z } } as Entity);
+    // Each overworld zone resolves to its own registered bucket.
+    for (const zone of ZONES) {
+      const mid = (zone.zMin + zone.zMax) / 2;
+      const bucket = at(0, mid);
+      expect(bucket).toBe(`sim.mob.z:${zone.id}`);
+      expect(SIM_MOB_ZONE_PHASES).toContain(bucket);
+    }
+    // Instance/delve mobs (x beyond the dungeon threshold) share the 'instance' bucket.
+    expect(at(10_000, 0)).toBe('sim.mob.z:instance');
+    // Distinct overworld zones do not collapse into one bucket.
+    expect(at(0, (ZONES[0].zMin + ZONES[0].zMax) / 2)).not.toBe(
+      at(0, (ZONES[1].zMin + ZONES[1].zMax) / 2),
+    );
   });
 });

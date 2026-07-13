@@ -2595,7 +2595,12 @@ export interface SimConfig {
   // `phase` (keeps wall-clock reads out of the sim, per the determinism guard). The
   // server injects it to feed its tick profiler during an on-demand capture; undefined
   // offline/headless, so the sim draws no wall clock in a deterministic scenario.
-  perfLap?: (phase: string) => void;
+  // The optional `entity` is a SUB-phase tag: the mob loop passes the mob it just
+  // updated so the host can split the mob.update cost per zone/group (issue #1833)
+  // without a second clock read or any per-mob work inside the sim. Every other lap
+  // omits it. Passing a reference allocates nothing and stays behavior-inert (the
+  // host reads it, the sim never does), so the parity/determinism gates are untouched.
+  perfLap?: (phase: string, entity?: Entity) => void;
   // When true, the Sowfield auto-runs a bot-vs-bot showcase match after a stretch
   // of no queue activity, so a walk-up spectator always has a game to watch (and
   // bet on). Server + offline game enable it; tests/goldens leave it off so the
