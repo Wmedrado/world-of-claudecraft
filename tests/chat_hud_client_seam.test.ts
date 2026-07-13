@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ClientWorld } from '../src/net/online';
+import { Hud } from '../src/ui/hud';
 
 vi.mock('../src/render/characters', () => ({ CharacterPreview: class {} }));
 vi.mock('../src/render/characters/assets', () => ({ preloadMechAssets: vi.fn() }));
@@ -12,9 +13,8 @@ vi.mock('../src/render/characters/portrait', () => ({
 afterEach(() => vi.unstubAllGlobals());
 
 describe('Hud to ClientWorld chat seam', () => {
-  it('sends an explicit /say command when the Hud presents the neutral Say channel', async () => {
+  it('sends an explicit /say command when the Hud presents the neutral Say channel', () => {
     vi.stubGlobal('WebSocket', { OPEN: 1 });
-    const { Hud } = await import('../src/ui/hud');
     const hud = Object.create(Hud.prototype) as InstanceType<typeof Hud>;
     const state = hud as unknown as {
       activeChatTab: string;
