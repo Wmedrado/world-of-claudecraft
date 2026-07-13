@@ -173,6 +173,8 @@ export function updatePlayerAutoAttack(ctx: SimContext, p: Entity, meta: PlayerM
   p.swingTimer = (baseSwingSpeed(p) * ctx.swingIntervalMult(p)) / (1 + p.meleeHaste);
 }
 
+export const AUTO_SHOT_LABEL = 'Auto Shot';
+
 export function rangedSwing(
   ctx: SimContext,
   attacker: Entity,
@@ -180,13 +182,14 @@ export function rangedSwing(
   ranged: { min: number; max: number; speed: number; wand?: boolean; school?: string },
 ): void {
   const school = ranged.wand ? (ranged.school ?? 'arcane') : 'physical';
-  const label = ranged.wand ? 'Wand' : 'Auto Shot';
+  const label = ranged.wand ? 'Wand' : AUTO_SHOT_LABEL;
   ctx.emit({
     type: 'spellfx',
     sourceId: attacker.id,
     targetId: target.id,
     school,
     fx: 'projectile',
+    ...(ranged.wand ? {} : { attackAnimation: 'ranged-shot' as const }),
   });
   // The shot/bolt is in flight: its miss roll and damage land when it reaches the
   // target (projectile_travel), and fizzle if the target dies before impact.
@@ -202,6 +205,7 @@ export function rangedSwing(
         school,
         ability: label,
         kind: 'miss',
+        ...(ranged.wand ? {} : { attackAnimationStarted: true as const }),
       });
       ctx.enterCombat(atk, tgt);
       return;
@@ -219,7 +223,19 @@ export function rangedSwing(
     if (crit) dmg *= 2 + atk.critDmgPhysBonus;
     // wand bolts are magic — armor doesn't apply; physical auto shot is mitigated
     if (!ranged.wand) dmg *= 1 - armorReduction(ctx.effectiveArmor(tgt), atk.level);
-    ctx.dealDamage(atk, tgt, Math.max(1, Math.round(dmg)), crit, school, label, 'hit');
+    ctx.dealDamage(
+      atk,
+      tgt,
+      Math.max(1, Math.round(dmg)),
+      crit,
+      school,
+      label,
+      'hit',
+      false,
+      undefined,
+      true,
+      !ranged.wand,
+    );
     // 4-piece set procs keyed to weapon crits (ranged arm). Gated on setProcs
     // inside applySetProcs, so proc-less players draw no rng.
     if (crit && atk.kind === 'player') ctx.applySetProcs(atk, tgt, 'weaponCrit');

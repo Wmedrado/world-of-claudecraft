@@ -15,6 +15,20 @@ const revokeAccountMechChroma = vi.fn(async (_accountId: number, _chromaId: stri
   completedQuestIds: [],
   mechChromaIds: [],
 }));
+const grantAccountWeaponSkins = vi.fn(async (_accountId: number, skinIds: string[]) => ({
+  completedQuestIds: [],
+  mechChromaIds: [],
+  weaponSkinIds: [...skinIds],
+  weaponSkinLoadout: {},
+}));
+const setAccountWeaponSkinLoadout = vi.fn(
+  async (_accountId: number, loadout: Record<string, string>) => ({
+    completedQuestIds: [],
+    mechChromaIds: [],
+    weaponSkinIds: Object.values(loadout),
+    weaponSkinLoadout: loadout,
+  }),
+);
 
 vi.mock('../server/db', () => ({
   pool: { query: vi.fn(async () => ({ rows: [] })) },
@@ -30,6 +44,10 @@ vi.mock('../server/db', () => ({
     grantAccountMechChroma(...(args as [number, string])),
   revokeAccountMechChroma: (...args: unknown[]) =>
     revokeAccountMechChroma(...(args as [number, string])),
+  grantAccountWeaponSkins: (...args: unknown[]) =>
+    grantAccountWeaponSkins(...(args as [number, string[]])),
+  setAccountWeaponSkinLoadout: (...args: unknown[]) =>
+    setAccountWeaponSkinLoadout(...(args as [number, Record<string, string>])),
   // Character load leases: leave() releases and the autosave loop heartbeats, so
   // these must exist on the mock or those paths throw on the undefined export.
   acquireCharacterLease: vi.fn(async () => true),
@@ -79,7 +97,12 @@ describe('GameServer sessions', () => {
     const server = new GameServer();
     const session = expectJoined(
       server.join(fakeWs(), 11, 101, 'Lockedout', 'warrior', null, false, {
-        accountCosmetics: { completedQuestIds: ['q_aldrics_fallen_star'], mechChromaIds: [] },
+        accountCosmetics: {
+          completedQuestIds: ['q_aldrics_fallen_star'],
+          mechChromaIds: [],
+          weaponSkinIds: [],
+          weaponSkinLoadout: {},
+        },
       }),
     );
 
@@ -207,7 +230,12 @@ describe('GameServer sessions', () => {
     const server = new GameServer();
     const allowed = expectJoined(
       server.join(fakeWs(), 11, 101, 'Mechwearer', 'shaman', null, false, {
-        accountCosmetics: { completedQuestIds: [], mechChromaIds: ['amber_crimson'] },
+        accountCosmetics: {
+          completedQuestIds: [],
+          mechChromaIds: ['amber_crimson'],
+          weaponSkinIds: [],
+          weaponSkinLoadout: {},
+        },
       }),
     );
     const blocked = expectJoined(server.join(fakeWs(), 12, 102, 'Blockedmech', 'shaman', null));
@@ -228,7 +256,12 @@ describe('GameServer sessions', () => {
   it('unequips a mech chroma from every live character on the account and returns its item', () => {
     revokeAccountMechChroma.mockClear();
     const server = new GameServer();
-    const cosmetics = { completedQuestIds: [], mechChromaIds: ['amber_crimson'] };
+    const cosmetics = {
+      completedQuestIds: [],
+      mechChromaIds: ['amber_crimson'],
+      weaponSkinIds: [],
+      weaponSkinLoadout: {},
+    };
     const first = expectJoined(
       server.join(fakeWs(), 11, 101, 'Mechone', 'shaman', null, false, {
         accountCosmetics: cosmetics,
@@ -568,5 +601,226 @@ describe('GameServer sessions', () => {
 
     // The character slot is freed: the same character can enter the world again.
     expectJoined(server.join(fakeWs(), 90, 900, 'Imdutha', 'warrior', null));
+  });
+});
+
+// Season 1 Armory weapon skins: the change_weapon_skin dispatch is the whole
+// server-authoritative surface (ownership from account cosmetics, the equipped
+// weapon-type gate re-validated by the Sim, FIFO account-wide persistence).
+// Warriors join holding worn_sword, a sword; ice_fang_sword is a sword
+// skin and glaciersplit_axe an axe skin.
+describe('GameServer weapon skin commands', () => {
+  const ownedSkins = (weaponSkinIds: string[], weaponSkinLoadout: Record<string, string> = {}) => ({
+    accountCosmetics: {
+      completedQuestIds: [],
+      mechChromaIds: [],
+      weaponSkinIds,
+      weaponSkinLoadout,
+    },
+  });
+
+  function changeSkin(server: GameServer, session: ClientSession, skin: unknown, wtype?: unknown) {
+    server.handleMessage(
+      session,
+      JSON.stringify({ t: 'cmd', cmd: 'change_weapon_skin', skin, wtype }),
+    );
+  }
+
+  it('applies an owned skin of the equipped weapon type and persists the loadout', async () => {
+    setAccountWeaponSkinLoadout.mockClear();
+    const server = new GameServer();
+    const session = expectJoined(
+      server.join(fakeWs(), 11, 101, 'Skinner', 'warrior', null, false, {
+        ...ownedSkins(['ice_fang_sword']),
+      }),
+    );
+
+    changeSkin(server, session, 'ice_fang_sword', 'sword');
+
+    // The skin attaches live on the entity, mirrors into the account loadout,
+    // and the single atomic jsonb_set write fires for the account.
+    expect(server.sim.entities.get(session.pid)?.weaponSkinId).toBe('ice_fang_sword');
+    expect(session.accountCosmetics.weaponSkinLoadout.sword).toBe('ice_fang_sword');
+    await vi.waitFor(() => {
+      expect(setAccountWeaponSkinLoadout).toHaveBeenCalledWith(11, {
+        sword: 'ice_fang_sword',
+      });
+    });
+  });
+
+  it('keeps hunter bow and crossbow selections mutually exclusive on the server', async () => {
+    setAccountWeaponSkinLoadout.mockClear();
+    const server = new GameServer();
+    const session = expectJoined(
+      server.join(fakeWs(), 11, 101, 'Ranger', 'hunter', null, false, {
+        ...ownedSkins(['winterbite', 'meteorlatch_crossbow']),
+      }),
+    );
+
+    changeSkin(server, session, 'winterbite', 'bow');
+    changeSkin(server, session, 'meteorlatch_crossbow', 'crossbow');
+
+    expect(server.sim.entities.get(session.pid)?.weaponSkinId).toBe('meteorlatch_crossbow');
+    expect(session.accountCosmetics.weaponSkinLoadout).toEqual({
+      crossbow: 'meteorlatch_crossbow',
+    });
+    await vi.waitFor(() => {
+      expect(setAccountWeaponSkinLoadout).toHaveBeenLastCalledWith(11, {
+        crossbow: 'meteorlatch_crossbow',
+      });
+    });
+
+    changeSkin(server, session, 'winterbite', 'bow');
+
+    expect(server.sim.entities.get(session.pid)?.weaponSkinId).toBe('winterbite');
+    expect(session.accountCosmetics.weaponSkinLoadout).toEqual({ bow: 'winterbite' });
+    await vi.waitFor(() => {
+      expect(setAccountWeaponSkinLoadout).toHaveBeenLastCalledWith(11, { bow: 'winterbite' });
+    });
+  });
+
+  it('rejects applying a skin the account does not own (anti-forge), with no db write', () => {
+    setAccountWeaponSkinLoadout.mockClear();
+    const server = new GameServer();
+    const session = expectJoined(
+      server.join(fakeWs(), 11, 101, 'Forger', 'warrior', null, false, {
+        ...ownedSkins([]),
+      }),
+    );
+
+    changeSkin(server, session, 'ice_fang_sword', 'sword');
+
+    expect(server.sim.entities.get(session.pid)?.weaponSkinId).toBeNull();
+    expect(session.accountCosmetics.weaponSkinLoadout).toEqual({});
+    expect(setAccountWeaponSkinLoadout).not.toHaveBeenCalled();
+  });
+
+  it('rejects an owned skin whose type does not match the equipped weapon', () => {
+    setAccountWeaponSkinLoadout.mockClear();
+    const server = new GameServer();
+    // Owns the axe skin, but the warrior is holding worn_sword (a sword), so
+    // the Sim's equipped-type gate must refuse the apply.
+    const session = expectJoined(
+      server.join(fakeWs(), 11, 101, 'Mismatch', 'warrior', null, false, {
+        ...ownedSkins(['glaciersplit_axe']),
+      }),
+    );
+
+    changeSkin(server, session, 'glaciersplit_axe', 'axe');
+
+    expect(server.sim.entities.get(session.pid)?.weaponSkinId).toBeNull();
+    expect(session.accountCosmetics.weaponSkinLoadout).toEqual({});
+    expect(setAccountWeaponSkinLoadout).not.toHaveBeenCalled();
+  });
+
+  it('detaches an applied skin (skin null + wtype) and persists the emptied loadout', async () => {
+    setAccountWeaponSkinLoadout.mockClear();
+    const server = new GameServer();
+    const session = expectJoined(
+      server.join(fakeWs(), 11, 101, 'Detacher', 'warrior', null, false, {
+        ...ownedSkins(['ice_fang_sword'], { sword: 'ice_fang_sword' }),
+      }),
+    );
+    // The join seeds the account loadout onto the fresh sim entity.
+    expect(server.sim.entities.get(session.pid)?.weaponSkinId).toBe('ice_fang_sword');
+
+    changeSkin(server, session, 'ice_fang_sword', 'sword');
+    changeSkin(server, session, null, 'sword');
+
+    expect(server.sim.entities.get(session.pid)?.weaponSkinId).toBeNull();
+    expect(session.accountCosmetics.weaponSkinLoadout).toEqual({});
+    await vi.waitFor(() => {
+      expect(setAccountWeaponSkinLoadout).toHaveBeenLastCalledWith(11, {});
+    });
+  });
+
+  it('ignores junk change_weapon_skin input without touching the loadout or the db', () => {
+    setAccountWeaponSkinLoadout.mockClear();
+    const server = new GameServer();
+    const session = expectJoined(
+      server.join(fakeWs(), 11, 101, 'Junkproof', 'warrior', null, false, {
+        ...ownedSkins(['ice_fang_sword'], { sword: 'ice_fang_sword' }),
+      }),
+    );
+
+    changeSkin(server, session, 123); // non-string skin, no wtype: not dispatched
+    changeSkin(server, session, null, 'polearm'); // no skins target polearms
+    changeSkin(server, session, null, 7); // non-string wtype: not dispatched
+
+    // The applied skin survives every malformed request and nothing is saved.
+    expect(server.sim.entities.get(session.pid)?.weaponSkinId).toBe('ice_fang_sword');
+    expect(session.accountCosmetics.weaponSkinLoadout).toEqual({ sword: 'ice_fang_sword' });
+    expect(setAccountWeaponSkinLoadout).not.toHaveBeenCalled();
+  });
+
+  it('applies the loadout to every live character on the account', async () => {
+    setAccountWeaponSkinLoadout.mockClear();
+    const server = new GameServer();
+    const cosmetics = {
+      completedQuestIds: [],
+      mechChromaIds: [],
+      weaponSkinIds: ['ice_fang_sword'],
+      weaponSkinLoadout: {},
+    };
+    const first = expectJoined(
+      server.join(fakeWs(), 11, 101, 'Skinone', 'warrior', null, false, {
+        accountCosmetics: cosmetics,
+      }),
+    );
+    // The second live character rides the GM exemption from the per-account
+    // session cap (same trick as the mech-chroma sweep test); both are
+    // warriors, so both hold worn_sword and the sword skin applies to each.
+    const second = expectJoined(
+      server.join(fakeWs(), 11, 102, 'Skintwo', 'warrior', null, true, {
+        accountCosmetics: cosmetics,
+      }),
+    );
+
+    changeSkin(server, first, 'ice_fang_sword', 'sword');
+
+    expect(server.sim.entities.get(first.pid)?.weaponSkinId).toBe('ice_fang_sword');
+    expect(server.sim.entities.get(second.pid)?.weaponSkinId).toBe('ice_fang_sword');
+    expect(second.accountCosmetics.weaponSkinLoadout.sword).toBe('ice_fang_sword');
+    await vi.waitFor(() => {
+      expect(setAccountWeaponSkinLoadout).toHaveBeenCalledTimes(1);
+      expect(setAccountWeaponSkinLoadout).toHaveBeenCalledWith(11, {
+        sword: 'ice_fang_sword',
+      });
+    });
+  });
+
+  it('serializes rapid whole-loadout writes so the newest state cannot commit first', async () => {
+    setAccountWeaponSkinLoadout.mockClear();
+    let releaseFirst: (() => void) | undefined;
+    setAccountWeaponSkinLoadout.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseFirst = () =>
+            resolve({
+              completedQuestIds: [],
+              mechChromaIds: [],
+              weaponSkinIds: ['ice_fang_sword'],
+              weaponSkinLoadout: { sword: 'ice_fang_sword' },
+            });
+        }),
+    );
+    const server = new GameServer();
+    const session = expectJoined(
+      server.join(fakeWs(), 11, 101, 'RapidSkinner', 'warrior', null, false, {
+        ...ownedSkins(['ice_fang_sword']),
+      }),
+    );
+
+    changeSkin(server, session, 'ice_fang_sword', 'sword');
+    changeSkin(server, session, null, 'sword');
+
+    await vi.waitFor(() => expect(setAccountWeaponSkinLoadout).toHaveBeenCalledTimes(1));
+    expect(setAccountWeaponSkinLoadout).toHaveBeenNthCalledWith(1, 11, {
+      sword: 'ice_fang_sword',
+    });
+    releaseFirst?.();
+    await vi.waitFor(() => expect(setAccountWeaponSkinLoadout).toHaveBeenCalledTimes(2));
+    expect(setAccountWeaponSkinLoadout).toHaveBeenNthCalledWith(2, 11, {});
+    expect(session.accountCosmetics.weaponSkinLoadout).toEqual({});
   });
 });

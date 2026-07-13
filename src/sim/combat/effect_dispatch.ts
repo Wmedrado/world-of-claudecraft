@@ -89,6 +89,7 @@ export function runEffects(
   meta: PlayerMeta,
   target: Entity | null,
   res: ResolvedAbility,
+  attackAnimationStarted = false,
 ): void {
   const ability = res.def;
   const isSpell = ability.school !== 'physical';
@@ -158,6 +159,8 @@ export function runEffects(
           'hit',
           false,
           threatOpts,
+          true,
+          attackAnimationStarted,
         );
         if (isSpell) noteSpellHit(ctx, p, crit);
         if (!target.dead && ability.awardsCombo && !comboAwarded) {
@@ -191,6 +194,8 @@ export function runEffects(
           'hit',
           false,
           threatOpts,
+          true,
+          attackAnimationStarted,
         );
         break;
       }
@@ -391,7 +396,19 @@ export function runEffects(
           directHitBonus(p.spellPower, ability, res.castTime);
         const crit = ctx.rng.chance(consumeNextAttackCrit(ctx, p) ? 1 : ctx.spellCrit(p));
         if (crit) dmg *= 1.5 + p.critDmgSpellBonus;
-        ctx.dealDamage(p, target, Math.round(dmg), crit, 'holy', ability.name, 'hit');
+        ctx.dealDamage(
+          p,
+          target,
+          Math.round(dmg),
+          crit,
+          'holy',
+          ability.name,
+          'hit',
+          false,
+          undefined,
+          true,
+          attackAnimationStarted,
+        );
         noteSpellHit(ctx, p, crit);
         break;
       }
@@ -684,6 +701,8 @@ export function runEffects(
             'hit',
             false,
             threatOpts,
+            true,
+            attackAnimationStarted,
           );
         }
         break;
@@ -910,7 +929,19 @@ export function runEffects(
         for (const m of ctx.hostilesInRadius(p, p.pos, eff.radius)) {
           if (!ctx.hasLineOfSight(p, m)) continue;
           const dmg = ctx.rng.range(eff.min, eff.max) + aoeRootSp;
-          ctx.dealDamage(p, m, Math.round(dmg), false, ability.school, ability.name, 'hit');
+          ctx.dealDamage(
+            p,
+            m,
+            Math.round(dmg),
+            false,
+            ability.school,
+            ability.name,
+            'hit',
+            false,
+            undefined,
+            true,
+            attackAnimationStarted,
+          );
           if (!m.dead && ctx.isHostileTo(p, m)) {
             ctx.applyRootAura(
               p,

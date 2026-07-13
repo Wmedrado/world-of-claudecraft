@@ -78,6 +78,7 @@ export function dealDamage(
   // ticks). Only direct damage may walk a mob's leash anchor; passive damage must
   // let the mob leash (evade home) so it can't be kited an unlimited distance.
   direct = true,
+  attackAnimationStarted = false,
   // The amount is ALREADY fully source-modified (e.g. a Fiendlore share of damage the
   // owner already took): skip the source-output mods (Defensive Stance's own-damage cut,
   // Weakening Hex) so they are not applied a second time. Target-side amps, absorb, death,
@@ -93,6 +94,7 @@ export function dealDamage(
   // wild-mob leash recovery, and must not inherit this immunity from stale state.
   if (target.kind === 'mob' && target.aiState === 'evade' && target.ownerId === null) return;
   amount = Math.max(0, amount);
+  const attackAnimation = attackAnimationStarted ? { attackAnimationStarted: true as const } : {};
   // [dev] A god-mode player (/dev god) hits for 100x so a solo tester can chew
   // through raid bosses to inspect drops without one-shotting them past their phase
   // transitions. Gated on devCommands so it can NEVER apply in production (where gm
@@ -231,6 +233,7 @@ export function dealDamage(
           noRage,
           threatOpts,
           direct,
+          attackAnimationStarted,
           // The share is already fully source-modified: don't re-apply the source's
           // Defensive Stance cut / Weakening Hex to the pet's portion.
           true,
@@ -259,6 +262,7 @@ export function dealDamage(
         school,
         ability,
         kind,
+        ...attackAnimation,
       });
       // Book of Deeds: the clamped terminal hit counts (zero rng; the early
       // return skips the shared deed site and the session RewardCounters).
@@ -304,6 +308,7 @@ export function dealDamage(
         school,
         ability,
         kind,
+        ...attackAnimation,
       });
       // Book of Deeds: the clamped terminal hit counts (zero rng).
       if (source) deedsMod.onDamageDealtForDeeds(ctx, source, target, amount, crit, kind);
@@ -332,6 +337,7 @@ export function dealDamage(
         school,
         ability,
         kind,
+        ...attackAnimation,
       });
       // Book of Deeds: the clamped terminal hit counts (zero rng).
       if (source) deedsMod.onDamageDealtForDeeds(ctx, source, target, amount, crit, kind);
@@ -364,6 +370,7 @@ export function dealDamage(
         school,
         ability,
         kind,
+        ...attackAnimation,
       });
       // Book of Deeds: the clamped terminal hit counts (zero rng).
       if (source) deedsMod.onDamageDealtForDeeds(ctx, source, target, amount, crit, kind);
@@ -382,7 +389,17 @@ export function dealDamage(
   if (target.kind === 'mob') {
     const ymatch = ctx.yumiCatMatches.get(target.id);
     if (ymatch) {
-      ctx.yumiCatDamaged(ymatch, source, target, amount, crit, school, ability, kind);
+      ctx.yumiCatDamaged(
+        ymatch,
+        source,
+        target,
+        amount,
+        crit,
+        school,
+        ability,
+        kind,
+        attackAnimationStarted,
+      );
       return;
     }
   }
@@ -397,6 +414,7 @@ export function dealDamage(
     school,
     ability,
     kind,
+    ...attackAnimation,
   });
 
   if (amount > 0) {

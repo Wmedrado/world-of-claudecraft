@@ -88,6 +88,12 @@ import {
   type TalentModifiers,
   talentPointsAtLevel,
 } from './content/talents';
+import {
+  resolveActiveWeaponSkin,
+  weaponSkinTypeMatches,
+  withWeaponSkinApplied,
+} from './content/weapon_skin_rules';
+import { WEAPON_SKINS } from './content/weapon_skins';
 import { applyCooldowns, type SavedCooldowns, serializeCooldowns } from './cooldown_persist';
 import type { DelveShopGate, DelveShopOffer } from './data';
 import {
@@ -443,6 +449,8 @@ import {
   type VcNationId,
   type Vec3,
   virtualLevel,
+  type WeaponSkinLoadout,
+  type WeaponSkinType,
   xpToReachLevel,
 } from './types';
 import {
@@ -1311,7 +1319,12 @@ export class Sim {
   // social systems
   // parties / partyByPid / partyInvites / nextPartyId moved to the PartyMachine
   // (src/sim/social/party.ts, session A1); reached via `this.party`.
-  accountCosmetics: AccountCosmetics = { completedQuestIds: [], mechChromaIds: [] };
+  accountCosmetics: AccountCosmetics = {
+    completedQuestIds: [],
+    mechChromaIds: [],
+    weaponSkinIds: [],
+    weaponSkinLoadout: {},
+  };
   private nextLootRollId = 1;
   private pendingLootRolls = new Map<number, PendingLootRoll>();
   trades = new Map<number, TradeSession>(); // pid -> shared session (both pids point at it)
@@ -2422,6 +2435,65 @@ export class Sim {
     this.setPlayerSkin(this.primaryId, skin, catalog);
   }
 
+  /** Replace a player's whole weapon-skin loadout (host seed: the server pushes
+   *  the account-wide selection at join; offline keeps session-local state) and
+   *  re-resolve the active skin against the equipped mainhand. Cosmetic only. */
+  setWeaponSkinLoadout(pid: number, loadout: WeaponSkinLoadout): void {
+    const e = this.entities.get(pid);
+    if (!e || e.kind !== 'player') return;
+    const next: WeaponSkinLoadout = {};
+    for (const [t, skinId] of Object.entries(loadout)) {
+      if (typeof skinId !== 'string') continue;
+      const def = WEAPON_SKINS[skinId];
+      if (def && def.weaponType === t) next[def.weaponType] = skinId;
+    }
+    e.weaponSkinLoadout = next;
+    // For player entities templateId is the class id (createPlayer).
+    e.weaponSkinId = resolveActiveWeaponSkin(e.templateId, e.mainhandItemId, next);
+    this.mirrorWeaponSkinLoadout(pid, e);
+  }
+
+  /** Keep the local player's accountCosmetics view of the loadout in step with
+   *  the entity, so the store's applied badges read the same on BOTH hosts
+   *  (ClientWorld mirrors optimistically; offline Sim mirrors here). */
+  private mirrorWeaponSkinLoadout(pid: number, e: Entity): void {
+    if (pid !== this.primaryId) return;
+    const weaponSkinLoadout: Record<string, string> = {};
+    for (const [t, skinId] of Object.entries(e.weaponSkinLoadout)) {
+      if (skinId) weaponSkinLoadout[t] = skinId;
+    }
+    this.accountCosmetics = { ...this.accountCosmetics, weaponSkinLoadout };
+  }
+
+  /** Apply (skinId) or detach (null + weaponType) one weapon-skin loadout entry.
+   *  Applying requires a weapon of the skin's type equipped right now (the
+   *  account-ownership gate is the server's, before this call). Returns whether
+   *  the loadout changed. */
+  setWeaponSkin(pid: number, skinId: string | null, weaponType?: WeaponSkinType): boolean {
+    const e = this.entities.get(pid);
+    if (!e || e.kind !== 'player') return false;
+    const cls = e.templateId;
+    if (skinId !== null) {
+      const def = WEAPON_SKINS[skinId];
+      if (!def) return false;
+      if (!weaponSkinTypeMatches(cls, e.mainhandItemId, def.weaponType)) return false;
+      e.weaponSkinLoadout = withWeaponSkinApplied(e.weaponSkinLoadout, skinId) ?? {};
+    } else {
+      const t = weaponType;
+      if (!t || !e.weaponSkinLoadout[t]) return false;
+      const next = { ...e.weaponSkinLoadout };
+      delete next[t];
+      e.weaponSkinLoadout = next;
+    }
+    e.weaponSkinId = resolveActiveWeaponSkin(cls, e.mainhandItemId, e.weaponSkinLoadout);
+    this.mirrorWeaponSkinLoadout(pid, e);
+    return true;
+  }
+
+  changeWeaponSkin(skinId: string | null, weaponType?: WeaponSkinType): void {
+    this.setWeaponSkin(this.primaryId, skinId, weaponType);
+  }
+
   /** Set a player's guild name (online only) so it rides the entity wire and
    *  shows under their nameplate. Guilds live in the server social DB, not the
    *  Sim, so this is a passive display field. Offline/headless leave it ''.
@@ -3060,8 +3132,29 @@ export class Sim {
       updateYumiActive: (match) => yumiMod.updateYumiActive(sim.ctx, match),
       yumiPlayerDown: (match, victim, killerPid) =>
         yumiMod.yumiPlayerDown(sim.ctx, match, victim, killerPid),
-      yumiCatDamaged: (match, source, cat, amount, crit, school, ability, kind) =>
-        yumiMod.yumiCatDamaged(sim.ctx, match, source, cat, amount, crit, school, ability, kind),
+      yumiCatDamaged: (
+        match,
+        source,
+        cat,
+        amount,
+        crit,
+        school,
+        ability,
+        kind,
+        attackAnimationStarted,
+      ) =>
+        yumiMod.yumiCatDamaged(
+          sim.ctx,
+          match,
+          source,
+          cat,
+          amount,
+          crit,
+          school,
+          ability,
+          kind,
+          attackAnimationStarted,
+        ),
       cleanupYumiMatch: (match) => yumiMod.cleanupYumiMatch(sim.ctx, match),
       // A2: isArenaCrossTeam/arenaTeamOf/endArenaMatch/endDuel (above) now forward to
       // social/arena.ts + social/duel.ts via Sim's thin delegates. The block below is
@@ -3301,7 +3394,8 @@ export class Sim {
       effectiveAttackPower: sim.effectiveAttackPower.bind(sim),
       hasLineOfSight: sim.hasLineOfSight.bind(sim),
       findChargePath: sim.findChargePath.bind(sim),
-      runEffects: (p, meta, target, res) => runEffectsImpl(sim.ctx, p, meta, target, res),
+      runEffects: (p, meta, target, res, attackAnimationStarted) =>
+        runEffectsImpl(sim.ctx, p, meta, target, res, attackAnimationStarted),
       applySetProcs: sim.applySetProcs.bind(sim),
       // P1a pet-AI seam: the helper the moved updatePet/petRangedAttack/petPickTarget
       // reach back for. syncPetAspect STAYS on Sim (pet-management, P1b owns it eventually);
@@ -4622,6 +4716,7 @@ export class Sim {
     noRage = false,
     threatOpts?: { flat?: number; mult?: number },
     direct = true,
+    attackAnimationStarted = false,
     alreadyFinal = false,
   ): void {
     dealDamageImpl(
@@ -4636,6 +4731,7 @@ export class Sim {
       noRage,
       threatOpts,
       direct,
+      attackAnimationStarted,
       alreadyFinal,
     );
   }
