@@ -2454,6 +2454,22 @@ export type SimEvent = { pid?: number } & (
         | 'throttled'
         | 'not_at_hub';
     }
+  // Gather-node harvest outcome (#1729): a successful resource harvest emits
+  // this so the client can play a gathering audio cue for the acting player.
+  // Personal (carries pid), delivered only to the harvester. Emitted only on a
+  // granted harvest (never on a denial), so every field is always present.
+  // Text-free on purpose (like craftResult/skinEvent above): the client selects
+  // its own audio and localized copy off the structured fields, so no sim/server
+  // i18n matcher rule is needed. `rarity` mirrors craftResult.quality so a
+  // rare-material harvest is distinguishable for a special cue.
+  | {
+      type: 'gatherResult';
+      nodeId: string;
+      nodeType: GatherNodeType;
+      professionId: GatheringProfessionId;
+      itemId: string;
+      rarity: 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
+    }
 );
 
 export interface MoveInput {
